@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "3103:8000"
     env_file:
       - .env
     restart: unless-stopped
@@ -14,7 +14,7 @@ services:
       context: frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:80"
+      - "8103:80"
     depends_on:
       - backend
     restart: unless-stopped

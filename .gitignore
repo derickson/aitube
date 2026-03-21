@@ -9,6 +9,7 @@ wheels/
 
 # Environment
 .env
+.env.uv
 
 # Node
 frontend/node_modules/
