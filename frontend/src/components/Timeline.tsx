@@ -1,9 +1,11 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
-  listContent,
+  searchContent,
   listSubscriptions,
   type ContentItem,
   type ContentType,
+  type ContentSearchResponse,
+  type FacetBucket,
   type Subscription,
 } from "../api/client";
 
@@ -12,13 +14,6 @@ const TYPE_LABELS: Record<ContentType, string> = {
   podcast_episode: "Podcast",
   article: "Article",
 };
-
-const TYPE_FILTERS: { value: ContentType | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "video", label: "YouTube" },
-  { value: "podcast_episode", label: "Podcasts" },
-  { value: "article", label: "Articles" },
-];
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "";
@@ -42,25 +37,40 @@ function formatDuration(seconds: number | null): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function facetCount(buckets: FacetBucket[] | undefined, key: string): number {
+  return buckets?.find((b) => b.key === key)?.count ?? 0;
+}
+
 export function Timeline() {
-  const [items, setItems] = useState<ContentItem[]>([]);
+  const [data, setData] = useState<ContentSearchResponse | null>(null);
   const [subs, setSubs] = useState<Record<string, Subscription>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Filters
+  // Server-side filters
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
-  const [subFilter, setSubFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
+  const [subFilter, setSubFilter] = useState("");
+  const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("");
+
+  // Debounce search
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [contentData, subData] = await Promise.all([
-        listContent({ size: 200 }),
+        searchContent({
+          q: debouncedSearch || undefined,
+          content_type: (typeFilter || undefined) as ContentType | undefined,
+          subscription_id: subFilter || undefined,
+          consumed: (consumedFilter || undefined) as "true" | "false" | undefined,
+          size: 200,
+        }),
         listSubscriptions(),
       ]);
-      setItems(contentData);
+      setData(contentData);
       const subMap: Record<string, Subscription> = {};
       for (const s of subData) subMap[s.id] = s;
       setSubs(subMap);
@@ -70,103 +80,126 @@ export function Timeline() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedSearch, typeFilter, subFilter, consumedFilter]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const filtered = useMemo(() => {
-    let result = items;
-    if (typeFilter !== "all") {
-      result = result.filter((i) => i.type === typeFilter);
-    }
-    if (subFilter !== "all") {
-      result = result.filter((i) => i.subscription_id === subFilter);
-    }
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      result = result.filter(
-        (i) =>
-          i.title.toLowerCase().includes(q) ||
-          i.summary.toLowerCase().includes(q) ||
-          (i.metadata as Record<string, unknown>)?.description?.toString().toLowerCase().includes(q),
-      );
-    }
-    return result;
-  }, [items, typeFilter, subFilter, search]);
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+    }, 300);
+  };
 
-  const counts = useMemo(() => {
-    const c = { all: items.length, video: 0, podcast_episode: 0, article: 0 };
-    for (const i of items) c[i.type]++;
-    return c;
-  }, [items]);
+  const items = data?.items ?? [];
+  const facets = data?.facets ?? {};
+  const total = data?.total ?? 0;
 
-  const uniqueSubs = useMemo(() => {
-    const ids = new Set(items.map((i) => i.subscription_id));
-    return Array.from(ids)
-      .map((id) => subs[id])
-      .filter(Boolean)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, subs]);
+  // Build source options from the subscription_id facet
+  const sourceBuckets = facets.subscription_id ?? [];
+  const sourceOptions = sourceBuckets
+    .map((b) => ({ id: b.key, name: subs[b.key]?.name ?? b.key, count: b.count }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const typeBuckets = facets.type ?? [];
+  const consumedBuckets = facets.consumed ?? [];
 
   return (
     <div className="timeline">
       <div className="timeline-header">
         <h2>Timeline</h2>
-        <span className="timeline-count">{filtered.length} items</span>
+        <span className="timeline-count">
+          {items.length} of {total} items
+        </span>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
-      {!loading && items.length > 0 && (
-        <div className="timeline-filters">
-          <input
-            type="text"
-            className="timeline-search"
-            placeholder="Search content..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="filter-pills">
-            {TYPE_FILTERS.map((f) => (
-              <button
-                key={f.value}
-                className={`filter-pill filter-pill-type-${f.value === "video" ? "youtube_channel" : f.value === "podcast_episode" ? "podcast" : f.value === "article" ? "rss" : f.value}${typeFilter === f.value ? " active" : ""}`}
-                onClick={() => setTypeFilter(f.value)}
-              >
-                {f.label}
-                <span className="filter-count">
-                  {f.value === "all" ? counts.all : counts[f.value]}
-                </span>
-              </button>
-            ))}
-          </div>
-          {uniqueSubs.length > 1 && (
-            <select
-              className="timeline-sub-filter"
-              value={subFilter}
-              onChange={(e) => setSubFilter(e.target.value)}
-            >
-              <option value="all">All sources</option>
-              {uniqueSubs.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
+      <div className="timeline-filters">
+        <input
+          type="text"
+          className="timeline-search"
+          placeholder="Search content..."
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+        />
 
-      {loading ? (
+        <div className="filter-pills">
+          <button
+            className={`filter-pill${!typeFilter ? " active" : ""}`}
+            onClick={() => setTypeFilter("")}
+          >
+            All <span className="filter-count">{total}</span>
+          </button>
+          {(["video", "podcast_episode", "article"] as ContentType[]).map((t) => (
+            <button
+              key={t}
+              className={`filter-pill filter-pill-type-${t === "video" ? "youtube_channel" : t === "podcast_episode" ? "podcast" : "rss"}${typeFilter === t ? " active" : ""}`}
+              onClick={() => setTypeFilter(typeFilter === t ? "" : t)}
+            >
+              {TYPE_LABELS[t]}
+              <span className="filter-count">{facetCount(typeBuckets, t)}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="filter-pills">
+          <button
+            className={`filter-pill${!consumedFilter ? " active" : ""}`}
+            onClick={() => setConsumedFilter("")}
+          >
+            All
+          </button>
+          {consumedBuckets.map((b) => (
+            <button
+              key={b.key}
+              className={`filter-pill${consumedFilter === (b.key === "watched" ? "true" : "false") ? " active" : ""}`}
+              onClick={() => {
+                const val = b.key === "watched" ? "true" : "false";
+                setConsumedFilter(consumedFilter === val ? "" : val);
+              }}
+            >
+              {b.key === "watched" ? "Watched" : "Unwatched"}
+              <span className="filter-count">{b.count}</span>
+            </button>
+          ))}
+        </div>
+
+        {sourceOptions.length > 1 && (
+          <select
+            className="timeline-sub-filter"
+            value={subFilter}
+            onChange={(e) => setSubFilter(e.target.value)}
+          >
+            <option value="">All sources</option>
+            {sourceOptions.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.count})
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {loading && items.length === 0 ? (
         <p className="loading-text">Loading timeline...</p>
       ) : items.length === 0 ? (
-        <p className="empty-text">No content yet. Add subscriptions and poll for new content.</p>
-      ) : filtered.length === 0 ? (
-        <p className="empty-text">No items match your filters.</p>
+        <p className="empty-text">
+          {total === 0
+            ? "No content yet. Add subscriptions and poll for new content."
+            : "No items match your filters."}
+        </p>
       ) : (
         <div className="content-grid">
-          {filtered.map((item) => (
-            <ContentCard key={item.id} item={item} subName={subs[item.subscription_id]?.name ?? ""} />
+          {items.map((item) => (
+            <ContentCard
+              key={item.id}
+              item={item}
+              subName={subs[item.subscription_id]?.name ?? ""}
+            />
           ))}
         </div>
       )}
@@ -194,10 +227,14 @@ function ContentCard({ item, subName }: { item: ContentItem; subName: string }) 
             src={item.thumbnail_url}
             alt=""
             loading="lazy"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
           />
           {item.duration_seconds && (
-            <span className="content-duration">{formatDuration(item.duration_seconds)}</span>
+            <span className="content-duration">
+              {formatDuration(item.duration_seconds)}
+            </span>
           )}
         </div>
       )}
@@ -213,12 +250,12 @@ function ContentCard({ item, subName }: { item: ContentItem; subName: string }) 
           )}
         </div>
         <h3 className="content-title">{item.title}</h3>
-        {description && (
-          <p className="content-desc">{description}</p>
-        )}
+        {description && <p className="content-desc">{description}</p>}
         <div className="content-meta">
           <span className="content-source">{subName}</span>
-          <span className="content-date">{formatDate(item.published_at)}</span>
+          <span className="content-date">
+            {formatDate(item.published_at)}
+          </span>
         </div>
       </div>
     </a>

@@ -156,6 +156,75 @@ async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
     return items
 
 
+def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
+    """Convert an RSS/Atom feed entry into a content-dlp-like dict."""
+    title_tag = item.find("title")
+    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+
+    # RSS: <link> text, Atom: <link href="">
+    link_tag = item.find("link")
+    url = ""
+    if link_tag:
+        url = link_tag.get("href", "") or link_tag.get_text(strip=True)
+
+    # GUID as external ID, fallback to URL
+    guid_tag = item.find("guid") or item.find("id")
+    guid = guid_tag.get_text(strip=True) if guid_tag else url
+    # Create a stable short ID
+    import hashlib
+    external_id = f"rss_{hashlib.md5(guid.encode()).hexdigest()[:12]}"
+
+    pub_tag = item.find("pubdate") or item.find("pubDate") or item.find("published") or item.find("updated")
+    published = pub_tag.get_text(strip=True) if pub_tag else None
+
+    desc_tag = item.find("description") or item.find("summary") or item.find("content")
+    description = desc_tag.get_text(strip=True) if desc_tag else ""
+
+    # Look for images
+    thumbnail = ""
+    media_thumb = item.find("media:thumbnail") or item.find("thumbnail")
+    if media_thumb:
+        thumbnail = media_thumb.get("url", "")
+    if not thumbnail:
+        enclosure = item.find("enclosure")
+        if enclosure and "image" in (enclosure.get("type") or ""):
+            thumbnail = enclosure.get("url", "")
+
+    return {
+        "content_id": external_id,
+        "source_type": "rss",
+        "url": url,
+        "title": title,
+        "description": description,
+        "author": None,
+        "published_date": published,
+        "duration_seconds": None,
+        "tags": [],
+        "thumbnail_url": thumbnail or None,
+    }
+
+
+async def _fetch_rss_feed(feed_url: str) -> list[dict[str, Any]]:
+    """Fetch and parse an RSS/Atom feed, returning individual items."""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+        resp = await client.get(feed_url, headers={"User-Agent": "AITube/0.1"})
+        resp.raise_for_status()
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    items = []
+
+    # RSS items
+    for entry in soup.find_all("item")[:30]:
+        items.append(_parse_rss_feed_entry(entry, feed_url))
+
+    # Atom entries (if no RSS items found)
+    if not items:
+        for entry in soup.find_all("entry")[:30]:
+            items.append(_parse_rss_feed_entry(entry, feed_url))
+
+    return items
+
+
 async def _get_existing_external_ids(subscription_id: str) -> set[str]:
     """Return set of external_ids already stored for this subscription."""
     es = get_es_client()
@@ -181,8 +250,7 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             raw = await content_dlp.fetch_podcast(subscription.url, episodes=10, no_audio=True)
             items_raw = raw if isinstance(raw, list) else [raw]
         elif subscription.type == SubscriptionType.rss:
-            raw = await content_dlp.fetch_webscrape(subscription.url)
-            items_raw = [raw] if isinstance(raw, dict) else raw
+            items_raw = await _fetch_rss_feed(subscription.url)
         else:
             logger.warning("Unknown subscription type: %s", subscription.type)
             return []

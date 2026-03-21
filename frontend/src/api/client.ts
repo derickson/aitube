@@ -130,18 +130,29 @@ export function deleteSubscription(id: string): Promise<{ deleted: string }> {
 
 // --- Content ---
 
-export function listContent(params?: {
+export interface FacetBucket {
+  key: string;
+  count: number;
+}
+
+export interface ContentSearchResponse {
+  items: ContentItem[];
+  total: number;
+  facets: Record<string, FacetBucket[]>;
+}
+
+export function searchContent(params?: {
   subscription_id?: string;
   content_type?: ContentType;
-  unwatched_only?: boolean;
+  consumed?: "true" | "false";
   q?: string;
   size?: number;
   offset?: number;
-}): Promise<ContentItem[]> {
+}): Promise<ContentSearchResponse> {
   const search = new URLSearchParams();
   if (params?.subscription_id) search.set("subscription_id", params.subscription_id);
   if (params?.content_type) search.set("content_type", params.content_type);
-  if (params?.unwatched_only) search.set("unwatched_only", "true");
+  if (params?.consumed) search.set("consumed", params.consumed);
   if (params?.q) search.set("q", params.q);
   if (params?.size !== undefined) search.set("size", String(params.size));
   if (params?.offset !== undefined) search.set("offset", String(params.offset));
