@@ -72,10 +72,17 @@ def _parse_dlp_item(
     }
 
 
-def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any]:
-    """Convert a YouTube Atom feed <entry> into a content-dlp-like dict."""
+def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any] | None:
+    """Convert a YouTube Atom feed <entry> into a content-dlp-like dict.
+    Returns None if the entry is a YouTube Short."""
     video_id_tag = entry.find("yt:videoid") or entry.find("videoid")
     video_id = video_id_tag.get_text(strip=True) if video_id_tag else ""
+
+    # Check if this is a Short via the link href
+    link_tag = entry.find("link", rel="alternate")
+    link_href = link_tag.get("href", "") if link_tag else ""
+    if "/shorts/" in link_href:
+        return None
 
     title_tag = entry.find("title")
     title = title_tag.get_text(strip=True) if title_tag else "Untitled"
@@ -154,8 +161,24 @@ async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
 
     items = []
     for entry in entries[:15]:
-        items.append(_parse_youtube_feed_entry(entry))
-    return _filter_by_age(items, settings.youtube_max_age_days)
+        parsed = _parse_youtube_feed_entry(entry)
+        if parsed is not None:
+            items.append(parsed)
+
+    items = _filter_by_age(items, settings.youtube_max_age_days)
+
+    # Fetch captions for each video via yt-dlp (one call per video)
+    if items:
+        from backend.app.services.youtube_captions import fetch_captions
+        for item in items:
+            try:
+                transcript = fetch_captions(item["url"])
+                if transcript:
+                    item["_transcript"] = transcript
+            except Exception as e:
+                logger.warning("Failed to fetch captions for %s: %s", item["url"], e)
+
+    return items
 
 
 def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
@@ -303,16 +326,20 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             except Exception as e:
                 logger.warning("Failed to scrape %s: %s", doc["url"], e)
 
-        # For YouTube videos, fetch captions via yt-dlp (fast, no audio download)
-        if subscription.type == SubscriptionType.youtube_channel and doc["url"]:
-            try:
-                from backend.app.services.youtube_captions import fetch_captions
-                logger.info("Fetching YouTube captions for %s", doc["url"])
-                transcript = fetch_captions(doc["url"])
-                if transcript:
-                    doc["transcript"] = transcript
-            except Exception as e:
-                logger.warning("Failed to fetch captions for %s: %s", doc["url"], e)
+        # For YouTube videos, use captions from feed parsing, fall back to content-dlp
+        if subscription.type == SubscriptionType.youtube_channel:
+            transcript = item_raw.get("_transcript")
+            if transcript:
+                doc["transcript"] = transcript
+            elif doc["url"]:
+                try:
+                    logger.info("No captions available, falling back to content-dlp transcription for %s", doc["url"])
+                    yt_data = await content_dlp.fetch_youtube(doc["url"], no_audio=False, transcript=True)
+                    if yt_data.get("transcript"):
+                        t = yt_data["transcript"]
+                        doc["transcript"] = t if isinstance(t, dict) else {"text": t, "chunks": []}
+                except Exception as e:
+                    logger.warning("content-dlp transcription also failed for %s: %s", doc["url"], e)
 
         # For podcast episodes, download audio and transcribe
         ad_skip_to: float | None = None
@@ -333,6 +360,28 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                         ad_skip_to = await detect_ad_end(transcript_obj["chunks"])
             except Exception as e:
                 logger.warning("Failed to transcribe podcast %s: %s", doc["title"], e)
+
+        # Generate AI summary
+        transcript_obj = doc.get("transcript")
+        transcript_text = ""
+        if isinstance(transcript_obj, dict):
+            transcript_text = transcript_obj.get("text", "")
+        # For articles, use the markdown content instead of transcript
+        source_text = transcript_text or doc.get("content_markdown", "")
+        if source_text or doc.get("metadata", {}).get("description"):
+            try:
+                from backend.app.services.summarizer import summarize_content
+                summary = await summarize_content(
+                    title=doc["title"],
+                    content_type=doc["type"],
+                    transcript_text=source_text,
+                    description=doc.get("metadata", {}).get("description", ""),
+                    author=doc.get("metadata", {}).get("author", ""),
+                )
+                if summary:
+                    doc["summary"] = summary
+            except Exception as e:
+                logger.warning("Failed to summarize %s: %s", doc["title"], e)
 
         doc_id = str(uuid.uuid4())
         await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)

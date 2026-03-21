@@ -202,6 +202,67 @@ async def set_consumed(item_id: str, consumed: bool = True):
     return {"id": item_id, "consumed": consumed}
 
 
+@router.get("/export/csv")
+async def export_csv():
+    """Export all content items as CSV using ES scroll cursor."""
+    from fastapi.responses import StreamingResponse
+    import csv
+    import io
+
+    es = get_es_client()
+
+    # Initial search with scroll
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {"match_all": {}},
+            "_source": ["url", "title", "type", "duration_seconds", "subscription_id", "published_at", "consumed"],
+            "sort": [{"published_at": {"order": "desc", "missing": "_last"}}],
+        },
+        scroll="2m",
+        size=500,
+    )
+
+    async def generate():
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "type", "title", "url", "duration_seconds", "published_at", "consumed"])
+        output.seek(0)
+        yield output.read()
+
+        nonlocal resp
+        while True:
+            hits = resp["hits"]["hits"]
+            if not hits:
+                break
+            for hit in hits:
+                s = hit["_source"]
+                output = io.StringIO()
+                writer = csv.writer(output)
+                writer.writerow([
+                    hit["_id"],
+                    s.get("type", ""),
+                    s.get("title", ""),
+                    s.get("url", ""),
+                    s.get("duration_seconds", ""),
+                    s.get("published_at", ""),
+                    s.get("consumed", False),
+                ])
+                output.seek(0)
+                yield output.read()
+
+            scroll_id = resp.get("_scroll_id")
+            if not scroll_id:
+                break
+            resp = await es.scroll(scroll_id=scroll_id, scroll="2m")
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=aitube-content.csv"},
+    )
+
+
 @router.delete("/{item_id}")
 async def delete_content_item(item_id: str):
     es = get_es_client()

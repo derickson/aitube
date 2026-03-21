@@ -17,6 +17,19 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function renderInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
+    .replace(/_(.+?)_/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\n\n+/g, "</p><p>")
+    .replace(/\n/g, "<br>")
+    .replace(/^/, "<p>")
+    .replace(/$/, "</p>");
+}
+
 interface Props {
   itemId: string;
   onClose: () => void;
@@ -29,6 +42,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
   const [consumed, setConsumed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [currentTime, setCurrentTime] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
@@ -104,6 +118,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
             item={item}
             initialPosition={playback?.position_seconds ?? 0}
             seekRef={videoSeekRef}
+            onTimeUpdate={setCurrentTime}
           />
         )}
         {item.type === "podcast_episode" && (
@@ -111,11 +126,22 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
             item={item}
             initialPosition={playback?.position_seconds ?? 0}
             seekRef={audioSeekRef}
+            onTimeUpdate={setCurrentTime}
           />
         )}
       </div>
 
       <div className="flyout-scroll">
+        {item.summary && (
+          <div className="flyout-summary">
+            <h3 className="flyout-summary-heading">Summary</h3>
+            <div
+              className="flyout-summary-text"
+              dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(item.summary) }}
+            />
+          </div>
+        )}
+
         {item.type === "article" && (
           <ArticleReader item={item} />
         )}
@@ -123,6 +149,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
         {hasTranscript && item.transcript && (
           <TranscriptViewer
             transcript={item.transcript}
+            currentTime={currentTime}
             onSeek={(time) => {
               if (item.type === "podcast_episode") {
                 audioSeekRef.current?.(time);
@@ -161,14 +188,17 @@ function YouTubePlayer({
   item,
   initialPosition,
   seekRef,
+  onTimeUpdate,
 }: {
   item: ContentItem;
   initialPosition: number;
   seekRef?: React.MutableRefObject<((time: number) => void) | null>;
+  onTimeUpdate?: (time: number) => void;
 }) {
   const videoId = extractVideoId(item.url);
   const playerRef = useRef<YT.Player | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const timeIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [ready, setReady] = useState(false);
 
   // Expose seek function to parent via ref
@@ -211,8 +241,10 @@ function YouTubePlayer({
         onStateChange: (event: YT.OnStateChangeEvent) => {
           if (event.data === YT.PlayerState.PLAYING) {
             startTracking();
+            startTimeUpdates();
           } else {
             stopTracking();
+            stopTimeUpdates();
             reportPosition();
           }
         },
@@ -221,6 +253,7 @@ function YouTubePlayer({
 
     return () => {
       stopTracking();
+      stopTimeUpdates();
       playerRef.current?.destroy();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -245,6 +278,23 @@ function YouTubePlayer({
     }
   }, []);
 
+  const startTimeUpdates = useCallback(() => {
+    stopTimeUpdates();
+    timeIntervalRef.current = setInterval(() => {
+      const player = playerRef.current;
+      if (player && typeof player.getCurrentTime === "function") {
+        onTimeUpdate?.(player.getCurrentTime());
+      }
+    }, 500);
+  }, [onTimeUpdate]);
+
+  const stopTimeUpdates = useCallback(() => {
+    if (timeIntervalRef.current) {
+      clearInterval(timeIntervalRef.current);
+      timeIntervalRef.current = undefined;
+    }
+  }, []);
+
   if (!videoId) return <p>Could not extract video ID from URL.</p>;
 
   return (
@@ -260,10 +310,12 @@ function AudioPlayer({
   item,
   initialPosition,
   seekRef,
+  onTimeUpdate,
 }: {
   item: ContentItem;
   initialPosition: number;
   seekRef?: React.MutableRefObject<((time: number) => void) | null>;
+  onTimeUpdate?: (time: number) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
@@ -346,6 +398,9 @@ function AudioPlayer({
         onPlay={startTracking}
         onPause={() => { stopTracking(); reportPosition(); }}
         onEnded={() => { stopTracking(); reportPosition(); }}
+        onTimeUpdate={() => {
+          if (audioRef.current) onTimeUpdate?.(audioRef.current.currentTime);
+        }}
       />
       {initialPosition > 0 && (
         <div className="audio-resume-hint">Resuming from {formatTime(initialPosition)}</div>
@@ -358,20 +413,45 @@ function AudioPlayer({
 
 function TranscriptViewer({
   transcript,
+  currentTime = 0,
   onSeek,
 }: {
   transcript: { text: string; chunks: { text: string; start: number; end: number }[] };
+  currentTime?: number;
   onSeek?: (time: number) => void;
 }) {
+  const activeRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastScrolledIndex = useRef(-1);
+
+  // Find the active chunk index
+  const activeIndex = transcript.chunks?.findIndex((chunk, i) => {
+    const next = transcript.chunks[i + 1];
+    return currentTime >= chunk.start && (!next || currentTime < next.start);
+  }) ?? -1;
+
+  // Auto-scroll to active chunk
+  useEffect(() => {
+    if (activeIndex >= 0 && activeIndex !== lastScrolledIndex.current && activeRef.current) {
+      lastScrolledIndex.current = activeIndex;
+      activeRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [activeIndex]);
+
   return (
     <div className="transcript-viewer">
       <h3 className="transcript-heading">Transcript</h3>
       {transcript.chunks && transcript.chunks.length > 0 ? (
-        <div className="transcript-chunks">
+        <div className="transcript-chunks" ref={containerRef}>
           {transcript.chunks.map((chunk, i) => (
             <div
               key={i}
-              className={`transcript-chunk${onSeek ? " transcript-chunk-clickable" : ""}`}
+              ref={i === activeIndex ? activeRef : undefined}
+              className={[
+                "transcript-chunk",
+                onSeek && "transcript-chunk-clickable",
+                i === activeIndex && "transcript-chunk-active",
+              ].filter(Boolean).join(" ")}
               onClick={() => onSeek?.(chunk.start)}
             >
               <span className="transcript-time">

@@ -804,7 +804,8 @@ main:has(.flyout-open) {
 /* Flyout Panel */
 
 .flyout {
-  width: 480px;
+  width: 50vw;
+  min-width: 480px;
   flex-shrink: 0;
   position: sticky;
   top: 0;
@@ -873,6 +874,51 @@ main:has(.flyout-open) {
   flex: 1;
   overflow-y: auto;
   padding: 1rem 1.25rem;
+}
+
+.flyout-summary {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.flyout-summary-heading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.flyout-summary p,
+.flyout-summary-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.flyout-summary-text p {
+  margin-bottom: 0.5rem;
+}
+
+.flyout-summary-text p:last-child {
+  margin-bottom: 0;
+}
+
+.flyout-summary-text strong {
+  font-weight: 600;
+}
+
+.flyout-summary-text code {
+  background: var(--bg-secondary);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.flyout-summary-text a {
+  color: var(--accent);
 }
 
 .flyout-actions-bottom {
@@ -945,6 +991,22 @@ main:has(.flyout-open) {
 
 .transcript-chunk-clickable:hover .transcript-time {
   text-decoration: underline;
+}
+
+.transcript-chunk-active {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
+  margin: -0.2rem -0.4rem;
+}
+
+.transcript-chunk-active .transcript-time {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.transcript-chunk-active .transcript-text {
+  color: #fff;
 }
 
 .transcript-time {
