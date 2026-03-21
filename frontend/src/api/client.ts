@@ -1,4 +1,4 @@
-const BASE = "/api";
+const BASE = "/aitube/api";
 
 export async function apiFetch<T>(
   path: string,

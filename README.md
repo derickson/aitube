@@ -41,7 +41,7 @@ npm install
 npm run dev
 ```
 
-The dev server starts at `http://localhost:8103` and proxies `/api` requests to the backend.
+The dev server starts at `http://localhost:8103/aitube/` and proxies API requests to the backend.
 
 ### Docker
 
@@ -50,7 +50,11 @@ docker compose up --build
 ```
 
 - Backend: `http://localhost:3103`
-- Frontend: `http://localhost:8103`
+- Frontend: `http://localhost:8103/aitube/`
+
+### Reverse Proxy
+
+The frontend is hosted under the `/aitube/` path, making it easy to serve alongside other apps behind a reverse proxy. Point your reverse proxy at `http://host:8103/aitube/` for the UI and `http://host:3103/api/` for the backend API.
 
 ## Adding Subscriptions
 
