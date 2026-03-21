@@ -32,10 +32,10 @@ class ContentItem(BaseModel):
     published_at: Optional[datetime] = None
     discovered_at: datetime
     duration_seconds: Optional[float] = None
-    thumbnail_url: str = ""
-    summary: str = ""
+    thumbnail_url: Optional[str] = ""
+    summary: Optional[str] = ""
     interest_score: Optional[float] = None
-    interest_reasoning: str = ""
+    interest_reasoning: Optional[str] = ""
     transcript: Optional[Transcript] = None
     content_markdown: str = ""
     content_dlp_cache_id: str = ""

@@ -1,7 +1,11 @@
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+
+import httpx
+from bs4 import BeautifulSoup
 
 from backend.app.models.subscription import Subscription, SubscriptionType
 from backend.app.services import content_dlp
@@ -68,6 +72,90 @@ def _parse_dlp_item(
     }
 
 
+def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any]:
+    """Convert a YouTube Atom feed <entry> into a content-dlp-like dict."""
+    video_id_tag = entry.find("yt:videoid") or entry.find("videoid")
+    video_id = video_id_tag.get_text(strip=True) if video_id_tag else ""
+
+    title_tag = entry.find("title")
+    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+
+    published_tag = entry.find("published")
+    published = published_tag.get_text(strip=True) if published_tag else None
+
+    thumbnail = entry.find("media:thumbnail") or entry.find("thumbnail")
+    thumb_url = thumbnail.get("url", "") if thumbnail else ""
+    if not thumb_url and video_id:
+        thumb_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+
+    desc_tag = entry.find("media:description") or entry.find("description")
+    description = desc_tag.get_text(strip=True) if desc_tag else ""
+
+    author_tag = entry.find("author")
+    author = ""
+    if author_tag:
+        name_tag = author_tag.find("name")
+        if name_tag:
+            author = name_tag.get_text(strip=True)
+
+    return {
+        "content_id": f"yt_{video_id}",
+        "source_type": "youtube",
+        "url": f"https://www.youtube.com/watch?v={video_id}" if video_id else "",
+        "title": title,
+        "description": description,
+        "author": author,
+        "published_date": published,
+        "duration_seconds": None,
+        "tags": [],
+        "thumbnail_url": thumb_url,
+    }
+
+
+async def _resolve_youtube_channel_id(channel_url: str) -> str | None:
+    """Extract channel ID from a YouTube channel page."""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(channel_url, headers={"User-Agent": "Mozilla/5.0"})
+            resp.raise_for_status()
+        # Look for channel ID in meta tags or page source
+        match = re.search(r'"externalId"\s*:\s*"(UC[\w-]+)"', resp.text)
+        if match:
+            return match.group(1)
+        # Try meta tag
+        match = re.search(r'<meta\s+itemprop="channelId"\s+content="(UC[\w-]+)"', resp.text)
+        if match:
+            return match.group(1)
+        # Try RSS link in page
+        match = re.search(r'channel_id=(UC[\w-]+)', resp.text)
+        if match:
+            return match.group(1)
+    except Exception as e:
+        logger.warning("Failed to resolve YouTube channel ID from %s: %s", channel_url, e)
+    return None
+
+
+async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
+    """Fetch recent videos from a YouTube channel via its Atom feed."""
+    channel_id = await _resolve_youtube_channel_id(channel_url)
+    if not channel_id:
+        logger.warning("Could not resolve channel ID for %s", channel_url)
+        return []
+
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+        resp = await client.get(feed_url, headers={"User-Agent": "AITube/0.1"})
+        resp.raise_for_status()
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    entries = soup.find_all("entry")
+
+    items = []
+    for entry in entries[:15]:
+        items.append(_parse_youtube_feed_entry(entry))
+    return items
+
+
 async def _get_existing_external_ids(subscription_id: str) -> set[str]:
     """Return set of external_ids already stored for this subscription."""
     es = get_es_client()
@@ -88,8 +176,7 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
 
     try:
         if subscription.type == SubscriptionType.youtube_channel:
-            raw = await content_dlp.fetch_youtube(subscription.url, no_audio=True)
-            items_raw = [raw] if isinstance(raw, dict) else raw
+            items_raw = await _fetch_youtube_channel_feed(subscription.url)
         elif subscription.type == SubscriptionType.podcast:
             raw = await content_dlp.fetch_podcast(subscription.url, episodes=10, no_audio=True)
             items_raw = raw if isinstance(raw, list) else [raw]
