@@ -8,6 +8,8 @@ import {
   type FacetBucket,
   type Subscription,
 } from "../api/client";
+import { ContentView } from "./ContentView";
+import { ErrorBanner } from "./ErrorBanner";
 
 const TYPE_LABELS: Record<ContentType, string> = {
   video: "YouTube",
@@ -47,11 +49,28 @@ export function Timeline() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Selected content for inline player
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [consumedIds, setConsumedIds] = useState<Set<string>>(new Set());
+
+  const fetchDataRef = useRef<() => void>(undefined);
+
+  const handleConsumedChange = useCallback((itemId: string, consumed: boolean) => {
+    setConsumedIds((prev) => {
+      const next = new Set(prev);
+      if (consumed) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+    // Re-fetch after a short delay to let ES update
+    setTimeout(() => fetchDataRef.current?.(), 500);
+  }, []);
+
   // Server-side filters
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
-  const [subFilter, setSubFilter] = useState("");
-  const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("");
+  const subFilter = "";
+  const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -82,6 +101,8 @@ export function Timeline() {
     }
   }, [debouncedSearch, typeFilter, subFilter, consumedFilter]);
 
+  fetchDataRef.current = fetchData;
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -98,12 +119,6 @@ export function Timeline() {
   const facets = data?.facets ?? {};
   const total = data?.total ?? 0;
 
-  // Build source options from the subscription_id facet
-  const sourceBuckets = facets.subscription_id ?? [];
-  const sourceOptions = sourceBuckets
-    .map((b) => ({ id: b.key, name: subs[b.key]?.name ?? b.key, count: b.count }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
   const typeBuckets = facets.type ?? [];
   const consumedBuckets = facets.consumed ?? [];
 
@@ -116,7 +131,7 @@ export function Timeline() {
         </span>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <ErrorBanner error={error} />}
 
       <div className="timeline-filters">
         <input
@@ -168,57 +183,78 @@ export function Timeline() {
           ))}
         </div>
 
-        {sourceOptions.length > 1 && (
-          <select
-            className="timeline-sub-filter"
-            value={subFilter}
-            onChange={(e) => setSubFilter(e.target.value)}
-          >
-            <option value="">All sources</option>
-            {sourceOptions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.count})
-              </option>
-            ))}
-          </select>
-        )}
       </div>
 
-      {loading && items.length === 0 ? (
-        <p className="loading-text">Loading timeline...</p>
-      ) : items.length === 0 ? (
-        <p className="empty-text">
-          {total === 0
-            ? "No content yet. Add subscriptions and poll for new content."
-            : "No items match your filters."}
-        </p>
-      ) : (
-        <div className="content-grid">
-          {items.map((item) => (
-            <ContentCard
-              key={item.id}
-              item={item}
-              subName={subs[item.subscription_id]?.name ?? ""}
-            />
-          ))}
+      <div className={`timeline-layout${selectedId ? " flyout-open" : ""}`}>
+        <div className="timeline-main">
+          {loading && items.length === 0 ? (
+            <p className="loading-text">Loading timeline...</p>
+          ) : items.length === 0 ? (
+            <p className="empty-text">
+              {total === 0
+                ? "No content yet. Add subscriptions and poll for new content."
+                : "No items match your filters."}
+            </p>
+          ) : (
+            <div className="content-grid">
+              {items.map((item) => (
+                <ContentCard
+                  key={item.id}
+                  item={item}
+                  subName={subs[item.subscription_id]?.name ?? ""}
+                  isActive={item.id === selectedId}
+                  isConsumed={consumedIds.has(item.id)}
+                  onSelect={() => setSelectedId(item.id === selectedId ? null : item.id)}
+                />
+              ))}
+            </div>
+          )}
         </div>
-      )}
+
+        {selectedId && (
+          <ContentView
+            itemId={selectedId}
+            onClose={() => setSelectedId(null)}
+            onConsumedChange={handleConsumedChange}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function ContentCard({ item, subName }: { item: ContentItem; subName: string }) {
+function ContentCard({
+  item,
+  subName,
+  isActive,
+  isConsumed,
+  onSelect,
+}: {
+  item: ContentItem;
+  subName: string;
+  isActive: boolean;
+  isConsumed: boolean;
+  onSelect: () => void;
+}) {
   const description =
     item.summary ||
     (item.metadata as Record<string, unknown>)?.description?.toString() ||
     "";
 
+  const classes = [
+    "content-card",
+    `content-card-type-${item.type}`,
+    isActive && "content-card-active",
+    isConsumed && "content-card-consumed",
+  ].filter(Boolean).join(" ");
+
   return (
-    <a
-      className={`content-card content-card-type-${item.type}`}
-      href={item.url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
+      className={classes}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") onSelect(); }}
     >
       {item.thumbnail_url && (
         <div className="content-thumb-wrap">
@@ -258,6 +294,6 @@ function ContentCard({ item, subName }: { item: ContentItem; subName: string }) 
           </span>
         </div>
       </div>
-    </a>
+    </div>
   );
 }

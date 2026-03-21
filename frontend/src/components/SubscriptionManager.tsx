@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { ErrorBanner } from "./ErrorBanner";
 import {
   listSubscriptions,
   createSubscription,
@@ -198,7 +199,7 @@ export function SubscriptionManager() {
         </button>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && <ErrorBanner error={error} />}
 
       {showAdd && (
         <div className="add-form">
@@ -362,6 +363,7 @@ export function SubscriptionManager() {
                     )}
                     <div className="sub-meta">
                       <span className={`status-badge status-${sub.status}`}>{sub.status}</span>
+                      <span className="sub-content-count">{sub.content_count} items</span>
                       {sub.last_polled_at && (
                         <span className="sub-polled">
                           Polled: {new Date(sub.last_polled_at).toLocaleString()}

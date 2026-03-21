@@ -37,6 +37,7 @@ class ContentItem(BaseModel):
     interest_score: Optional[float] = None
     interest_reasoning: Optional[str] = ""
     transcript: Optional[Transcript] = None
+    consumed: bool = False
     content_markdown: str = ""
     content_dlp_cache_id: str = ""
     metadata: dict[str, Any] = {}

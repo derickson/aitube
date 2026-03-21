@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from backend.app.models.playback import PlaybackState, PlaybackUpdate
 from backend.app.services.elasticsearch import (
+    CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
     get_es_client,
 )
@@ -36,13 +37,16 @@ async def update_playback(content_item_id: str, data: PlaybackUpdate):
     now = datetime.now(timezone.utc)
 
     # Check if content item has a duration to determine consumed status
-    from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX
     consumed = False
     try:
         item_resp = await es.get(index=CONTENT_ITEMS_INDEX, id=content_item_id)
         duration = item_resp["_source"].get("duration_seconds")
         if duration and duration > 0:
             consumed = position >= (duration * 0.9)
+        # Update consumed flag on the content item itself
+        prev_consumed = item_resp["_source"].get("consumed", False)
+        if consumed and not prev_consumed:
+            await es.update(index=CONTENT_ITEMS_INDEX, id=content_item_id, doc={"consumed": True})
     except Exception:
         pass
 

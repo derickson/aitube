@@ -30,6 +30,7 @@ export interface Subscription {
   status: SubscriptionStatus;
   added_at: string;
   last_polled_at: string | null;
+  content_count: number;
 }
 
 export interface TranscriptChunk {
@@ -58,6 +59,7 @@ export interface ContentItem {
   interest_score: number | null;
   interest_reasoning: string;
   transcript: Transcript | null;
+  consumed: boolean;
   content_markdown: string;
   metadata: Record<string, unknown>;
 }
@@ -162,6 +164,14 @@ export function searchContent(params?: {
 
 export function getContentItem(id: string): Promise<ContentItem> {
   return apiFetch(`/content/${id}`);
+}
+
+export function transcribeContentItem(id: string): Promise<{ status: string; transcript_length: number }> {
+  return apiFetch(`/content/${id}/transcribe`, { method: "POST" });
+}
+
+export function setConsumed(id: string, consumed: boolean): Promise<{ id: string; consumed: boolean }> {
+  return apiFetch(`/content/${id}/consumed?consumed=${consumed}`, { method: "PUT" });
 }
 
 // --- Playback ---

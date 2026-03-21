@@ -17,7 +17,7 @@ export default function App() {
   const handleToggle = useCallback((t: Theme) => setTheme(t), []);
 
   return (
-    <BrowserRouter basename="/aitube">
+    <BrowserRouter basename="/aitube/">
       <header className="app-header">
         <h1>AITube</h1>
         <nav>

@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -10,6 +11,7 @@ from backend.app.models.subscription import (
     SubscriptionUpdate,
 )
 from backend.app.services.elasticsearch import (
+    CONTENT_ITEMS_INDEX,
     SUBSCRIPTIONS_INDEX,
     get_es_client,
 )
@@ -65,16 +67,42 @@ async def create_subscription(data: SubscriptionCreate):
     return Subscription(id=doc_id, **doc)
 
 
-@router.get("", response_model=list[Subscription])
+class SubscriptionWithCount(Subscription):
+    content_count: int = 0
+
+
+@router.get("", response_model=list[SubscriptionWithCount])
 async def list_subscriptions():
     es = get_es_client()
-    resp = await es.search(
-        index=SUBSCRIPTIONS_INDEX,
-        body={"query": {"match_all": {}}, "size": 1000, "sort": [{"added_at": "desc"}]},
+
+    # Fetch subscriptions and content counts in parallel
+    sub_resp, count_resp = await asyncio.gather(
+        es.search(
+            index=SUBSCRIPTIONS_INDEX,
+            body={"query": {"match_all": {}}, "size": 1000, "sort": [{"added_at": "desc"}]},
+        ),
+        es.search(
+            index=CONTENT_ITEMS_INDEX,
+            body={
+                "size": 0,
+                "aggs": {"per_sub": {"terms": {"field": "subscription_id", "size": 10000}}},
+            },
+        ),
     )
+
+    # Build count map from aggregation
+    count_map: dict[str, int] = {}
+    for bucket in count_resp.get("aggregations", {}).get("per_sub", {}).get("buckets", []):
+        count_map[bucket["key"]] = bucket["doc_count"]
+
     results = []
-    for hit in resp["hits"]["hits"]:
-        results.append(Subscription(id=hit["_id"], **hit["_source"]))
+    for hit in sub_resp["hits"]["hits"]:
+        sub = SubscriptionWithCount(
+            id=hit["_id"],
+            **hit["_source"],
+            content_count=count_map.get(hit["_id"], 0),
+        )
+        results.append(sub)
     return results
 
 

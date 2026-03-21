@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -136,7 +136,9 @@ async def _resolve_youtube_channel_id(channel_url: str) -> str | None:
 
 
 async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
-    """Fetch recent videos from a YouTube channel via its Atom feed."""
+    """Fetch recent videos from a YouTube channel via its Atom feed, filtered by max age."""
+    from backend.app.config import settings
+
     channel_id = await _resolve_youtube_channel_id(channel_url)
     if not channel_id:
         logger.warning("Could not resolve channel ID for %s", channel_url)
@@ -153,7 +155,7 @@ async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
     items = []
     for entry in entries[:15]:
         items.append(_parse_youtube_feed_entry(entry))
-    return items
+    return _filter_by_age(items, settings.youtube_max_age_days)
 
 
 def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
@@ -225,6 +227,27 @@ async def _fetch_rss_feed(feed_url: str) -> list[dict[str, Any]]:
     return items
 
 
+def _filter_by_age(items: list[dict[str, Any]], max_age_days: int) -> list[dict[str, Any]]:
+    """Filter items to only those published within max_age_days."""
+    from dateutil import parser as dateparser
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    filtered = []
+    for item in items:
+        pub = item.get("published_date")
+        if pub:
+            try:
+                pub_dt = dateparser.parse(pub)
+                if pub_dt.tzinfo is None:
+                    pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                if pub_dt < cutoff:
+                    continue
+            except Exception:
+                pass
+        filtered.append(item)
+    return filtered
+
+
 async def _get_existing_external_ids(subscription_id: str) -> set[str]:
     """Return set of external_ids already stored for this subscription."""
     es = get_es_client()
@@ -247,10 +270,14 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
         if subscription.type == SubscriptionType.youtube_channel:
             items_raw = await _fetch_youtube_channel_feed(subscription.url)
         elif subscription.type == SubscriptionType.podcast:
+            from backend.app.config import settings
             raw = await content_dlp.fetch_podcast(subscription.url, episodes=10, no_audio=True)
             items_raw = raw if isinstance(raw, list) else [raw]
+            items_raw = _filter_by_age(items_raw, settings.podcast_max_age_days)
         elif subscription.type == SubscriptionType.rss:
+            from backend.app.config import settings
             items_raw = await _fetch_rss_feed(subscription.url)
+            items_raw = _filter_by_age(items_raw, settings.rss_max_age_days)
         else:
             logger.warning("Unknown subscription type: %s", subscription.type)
             return []
@@ -267,10 +294,64 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
         if doc["external_id"] in existing_ids:
             continue
 
+        # For RSS articles, scrape the full page content via content-dlp
+        if subscription.type == SubscriptionType.rss and doc["url"]:
+            try:
+                scraped = await content_dlp.fetch_webscrape(doc["url"])
+                doc["content_markdown"] = scraped.get("markdown", "")
+                doc["content_dlp_cache_id"] = scraped.get("content_id", "")
+            except Exception as e:
+                logger.warning("Failed to scrape %s: %s", doc["url"], e)
+
+        # For YouTube videos, fetch captions via yt-dlp (fast, no audio download)
+        if subscription.type == SubscriptionType.youtube_channel and doc["url"]:
+            try:
+                from backend.app.services.youtube_captions import fetch_captions
+                logger.info("Fetching YouTube captions for %s", doc["url"])
+                transcript = fetch_captions(doc["url"])
+                if transcript:
+                    doc["transcript"] = transcript
+            except Exception as e:
+                logger.warning("Failed to fetch captions for %s: %s", doc["url"], e)
+
+        # For podcast episodes, download audio and transcribe
+        ad_skip_to: float | None = None
+        if subscription.type == SubscriptionType.podcast and doc["url"]:
+            try:
+                extras = doc.get("metadata", {}).get("extras", {})
+                audio_url = extras.get("enclosure_url", doc["url"])
+                logger.info("Downloading and transcribing podcast: %s", doc["title"])
+                transcript_data = await content_dlp.download_and_transcribe(audio_url)
+                if transcript_data.get("transcript"):
+                    t = transcript_data["transcript"]
+                    doc["transcript"] = t if isinstance(t, dict) else {"text": t, "chunks": []}
+
+                    # Detect ads at the start and find where content begins
+                    transcript_obj = doc["transcript"]
+                    if isinstance(transcript_obj, dict) and transcript_obj.get("chunks"):
+                        from backend.app.services.ad_detector import detect_ad_end
+                        ad_skip_to = await detect_ad_end(transcript_obj["chunks"])
+            except Exception as e:
+                logger.warning("Failed to transcribe podcast %s: %s", doc["title"], e)
+
         doc_id = str(uuid.uuid4())
         await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)
         new_ids.append(doc_id)
         logger.info("New content: %s — %s", doc["title"], doc_id)
+
+        # If an ad was detected, set the playback position to skip past it
+        if ad_skip_to is not None and ad_skip_to > 0:
+            from backend.app.services.elasticsearch import PLAYBACK_STATE_INDEX
+            await es.index(
+                index=PLAYBACK_STATE_INDEX,
+                document={
+                    "content_item_id": doc_id,
+                    "position_seconds": round(ad_skip_to / 5) * 5,
+                    "consumed": False,
+                    "last_updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            logger.info("Set playback to %.0fs to skip ad for %s", ad_skip_to, doc["title"])
 
     # Update last_polled_at
     await es.update(

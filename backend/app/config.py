@@ -15,5 +15,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # Polling
+    youtube_max_age_days: int = 5
+    podcast_max_age_days: int = 5
+    rss_max_age_days: int = 120
+
 
 settings = Settings()

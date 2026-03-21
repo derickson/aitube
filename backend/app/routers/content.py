@@ -41,6 +41,13 @@ async def list_content(
         filter_clauses.append({"term": {"subscription_id": subscription_id}})
     if content_type:
         filter_clauses.append({"term": {"type": content_type}})
+    if consumed == "true":
+        filter_clauses.append({"term": {"consumed": True}})
+    elif consumed == "false":
+        filter_clauses.append({"bool": {"should": [
+            {"term": {"consumed": False}},
+            {"bool": {"must_not": {"exists": {"field": "consumed"}}}},
+        ]}})
     if q:
         must.append({
             "multi_match": {
@@ -66,77 +73,60 @@ async def list_content(
     else:
         query = {"match_all": {}}
 
-    # Build aggregations for facets
-    aggs = {
-        "type": {"terms": {"field": "type", "size": 10}},
-        "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
-    }
-
-    body: dict[str, Any] = {
+    # Filtered search for results
+    search_body: dict[str, Any] = {
         "query": query,
         "size": size,
         "from": offset,
         "sort": [{"published_at": {"order": "desc", "missing": "_last"}}],
-        "aggs": aggs,
     }
 
-    resp = await es.search(index=CONTENT_ITEMS_INDEX, body=body)
+    # Unfiltered aggregation for global facet counts
+    global_aggs = {
+        "type": {"terms": {"field": "type", "size": 10}},
+        "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
+        "consumed": {"terms": {"field": "consumed", "missing": False}},
+    }
+    aggs_body: dict[str, Any] = {
+        "size": 0,
+        "aggs": global_aggs,
+    }
 
-    # Get all item IDs from this page to look up consumed status
-    hits = resp["hits"]["hits"]
-    item_ids = [hit["_id"] for hit in hits]
-
-    # Batch lookup consumed status
-    consumed_set: set[str] = set()
-    if item_ids:
-        playback_resp = await es.search(
-            index=PLAYBACK_STATE_INDEX,
-            body={
-                "query": {"terms": {"content_item_id": item_ids}},
-                "size": len(item_ids),
-                "_source": ["content_item_id", "consumed"],
-            },
-        )
-        consumed_set = {
-            h["_source"]["content_item_id"]
-            for h in playback_resp["hits"]["hits"]
-            if h["_source"].get("consumed")
-        }
-
-    # Also get global consumed count for the facet
-    consumed_count_resp = await es.count(
-        index=PLAYBACK_STATE_INDEX,
-        body={"query": {"term": {"consumed": True}}},
+    import asyncio
+    search_resp, aggs_resp = await asyncio.gather(
+        es.search(index=CONTENT_ITEMS_INDEX, body=search_body),
+        es.search(index=CONTENT_ITEMS_INDEX, body=aggs_body),
     )
-    total_consumed = consumed_count_resp["count"]
 
-    # Build items list, applying consumed filter if requested
+    hits = search_resp["hits"]["hits"]
     items: list[ContentItem] = []
     for hit in hits:
-        item = ContentItem(id=hit["_id"], **hit["_source"])
-        is_consumed = hit["_id"] in consumed_set
-        if consumed == "true" and not is_consumed:
-            continue
-        if consumed == "false" and is_consumed:
-            continue
-        items.append(item)
+        items.append(ContentItem(id=hit["_id"], **hit["_source"]))
 
-    total_hits = resp["hits"]["total"]
+    total_hits = search_resp["hits"]["total"]
     total = total_hits["value"] if isinstance(total_hits, dict) else total_hits
 
-    # Build facets from aggregations
+    # Build facets from unfiltered aggregations
     facets: dict[str, list[FacetBucket]] = {}
-    for agg_name, agg_data in resp.get("aggregations", {}).items():
-        facets[agg_name] = [
-            FacetBucket(key=bucket["key"], count=bucket["doc_count"])
-            for bucket in agg_data.get("buckets", [])
-        ]
-
-    # Add consumed/unwatched facet
-    facets["consumed"] = [
-        FacetBucket(key="unwatched", count=total - total_consumed),
-        FacetBucket(key="watched", count=total_consumed),
-    ]
+    for agg_name, agg_data in aggs_resp.get("aggregations", {}).items():
+        if agg_name == "consumed":
+            watched = 0
+            unwatched = 0
+            for bucket in agg_data.get("buckets", []):
+                key = bucket.get("key_as_string", str(bucket.get("key", "")))
+                if key in ("true", "1", "True"):
+                    watched = bucket["doc_count"]
+                else:
+                    unwatched = bucket["doc_count"]
+            facets["consumed"] = [
+                FacetBucket(key="unwatched", count=unwatched),
+                FacetBucket(key="watched", count=watched),
+            ]
+        else:
+            facets[agg_name] = [
+                FacetBucket(key=bucket["key"], count=bucket["doc_count"])
+                for bucket in agg_data.get("buckets", [])
+            ]
 
     return ContentSearchResponse(items=items, total=total, facets=facets)
 
@@ -149,6 +139,67 @@ async def get_content_item(item_id: str):
     except Exception:
         raise HTTPException(status_code=404, detail="Content item not found")
     return ContentItem(id=resp["_id"], **resp["_source"])
+
+
+@router.post("/{item_id}/transcribe")
+async def transcribe_content_item(item_id: str):
+    """Trigger transcription for a content item. Downloads audio and runs local Parakeet TDT."""
+    from backend.app.services import content_dlp
+
+    es = get_es_client()
+    try:
+        resp = await es.get(index=CONTENT_ITEMS_INDEX, id=item_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Content item not found")
+
+    item = resp["_source"]
+    item_type = item.get("type")
+    url = item.get("url", "")
+
+    if not url:
+        raise HTTPException(status_code=400, detail="No URL to transcribe")
+
+    try:
+        if item_type == "video":
+            raw = await content_dlp.fetch_youtube(url, no_audio=False, transcript=True)
+        elif item_type == "podcast_episode":
+            extras = item.get("metadata", {}).get("extras", {})
+            audio_url = extras.get("enclosure_url", url)
+            raw = await content_dlp.download_and_transcribe(audio_url)
+        else:
+            raise HTTPException(status_code=400, detail=f"Cannot transcribe type: {item_type}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+
+    # Extract transcript from result
+    transcript = None
+    if raw.get("transcript"):
+        t = raw["transcript"]
+        if isinstance(t, dict):
+            transcript = t
+        elif isinstance(t, str):
+            transcript = {"text": t, "chunks": []}
+
+    if not transcript:
+        raise HTTPException(status_code=500, detail="No transcript produced")
+
+    # Update the ES document
+    await es.update(
+        index=CONTENT_ITEMS_INDEX,
+        id=item_id,
+        doc={"transcript": transcript},
+    )
+
+    return {"status": "ok", "transcript_length": len(transcript.get("text", ""))}
+
+
+@router.put("/{item_id}/consumed")
+async def set_consumed(item_id: str, consumed: bool = True):
+    es = get_es_client()
+    await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"consumed": consumed})
+    return {"id": item_id, "consumed": consumed}
 
 
 @router.delete("/{item_id}")

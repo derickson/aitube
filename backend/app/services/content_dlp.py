@@ -57,6 +57,48 @@ async def fetch_podcast(
     return await run_content_dlp(*args)
 
 
+async def download_and_transcribe(audio_url: str) -> dict[str, Any]:
+    """Download an audio file from a URL and transcribe it locally."""
+    import tempfile
+    import httpx
+
+    # Download audio to a temp file
+    logger.info("Downloading audio from %s", audio_url)
+    async with httpx.AsyncClient(follow_redirects=True, timeout=300) as client:
+        resp = await client.get(audio_url, headers={"User-Agent": "AITube/0.1"})
+        resp.raise_for_status()
+
+    # Determine extension from content-type or URL
+    ct = resp.headers.get("content-type", "")
+    if "mpeg" in ct or audio_url.endswith(".mp3"):
+        ext = ".mp3"
+    elif "mp4" in ct or "m4a" in ct:
+        ext = ".m4a"
+    elif "wav" in ct:
+        ext = ".wav"
+    else:
+        ext = ".mp3"
+
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+        f.write(resp.content)
+        tmp_path = f.name
+
+    logger.info("Downloaded %d bytes to %s, starting transcription", len(resp.content), tmp_path)
+
+    try:
+        result = await run_content_dlp("transcribe", "--force", tmp_path)
+    finally:
+        import os
+        os.unlink(tmp_path)
+
+    # content-dlp transcribe returns {text, chunks, model} at top level
+    # Wrap it in a transcript key for consistency with other subcommands
+    if "transcript" not in result and "text" in result:
+        result = {"transcript": {"text": result.get("text", ""), "chunks": result.get("chunks", [])}}
+
+    return result
+
+
 async def fetch_webscrape(url: str) -> dict[str, Any]:
     """Scrape a web page and return markdown content."""
     return await run_content_dlp("webscrape", url)

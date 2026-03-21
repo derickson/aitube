@@ -57,6 +57,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "interest_score": {"type": "float"},
                 "interest_reasoning": {"type": "text"},
                 "transcript": {"type": "object", "enabled": False},
+                "consumed": {"type": "boolean"},
                 "content_markdown": {"type": "text"},
                 "content_dlp_cache_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": False},
