@@ -7,6 +7,8 @@ services:
       - "3103:8000"
     env_file:
       - .env
+    environment:
+      - CONTENT_DLP_URL=http://host.docker.internal:7055
     restart: unless-stopped
 
   frontend:

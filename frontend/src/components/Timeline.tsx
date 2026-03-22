@@ -80,7 +80,7 @@ export function Timeline() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
   const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">("");
-  const subFilter = "";
+  const [subFilter, setSubFilter] = useState("");
   const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
 
   // Debounce search
@@ -147,6 +147,11 @@ export function Timeline() {
   const typeBuckets = facets.type ?? [];
   const consumedBuckets = facets.consumed ?? [];
   const interestBuckets = facets.interest ?? [];
+  const subBuckets = (facets.subscription_id ?? []).sort((a, b) => {
+    const nameA = subs[a.key]?.name ?? a.key;
+    const nameB = subs[b.key]?.name ?? b.key;
+    return nameA.localeCompare(nameB);
+  });
 
   return (
     <div className="timeline">
@@ -231,6 +236,30 @@ export function Timeline() {
             >
               <span>Not interested</span><span className="facet-count">{facetCount(interestBuckets, "down")}</span>
             </button>
+          </div>
+
+          <div className="facet-group">
+            <h4 className="facet-heading">Source</h4>
+            <button
+              className={`facet-item${!subFilter ? " active" : ""}`}
+              onClick={() => setSubFilter("")}
+            >
+              <span>All</span>
+            </button>
+            {subBuckets.map((b) => {
+              const name = subs[b.key]?.name ?? b.key;
+              const label = name.length > 15 ? name.slice(0, 15) + "…" : name;
+              return (
+                <button
+                  key={b.key}
+                  className={`facet-item${subFilter === b.key ? " active" : ""}`}
+                  onClick={() => setSubFilter(subFilter === b.key ? "" : b.key)}
+                  title={name}
+                >
+                  <span>{label}</span><span className="facet-count">{b.count}</span>
+                </button>
+              );
+            })}
           </div>
         </aside>
 

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # Content-DLP
+    content_dlp_url: str = "http://localhost:7055"
+
     # Polling
     youtube_max_age_days: int = 5
     podcast_max_age_days: int = 5

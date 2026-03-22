@@ -18,7 +18,50 @@ from backend.app.services.elasticsearch import (
     get_es_client,
 )
 
+from dateutil import parser as dateparser
+
 logger = logging.getLogger(__name__)
+
+_RSS_DATE_FORMATS = [
+    "%a, %d %b %Y %H:%M:%S %z",
+    "%a, %d %b %Y %H:%M:%S %Z",
+    "%d %b %Y %H:%M:%S %z",
+]
+
+
+def _normalize_date_to_iso(value: str) -> str | None:
+    """Parse a date string from any common feed format into ISO 8601."""
+    if not value or not value.strip():
+        return None
+
+    value = value.strip()
+
+    # Already ISO 8601 — pass through
+    if re.match(r"^\d{4}-\d{2}-\d{2}(T|\s)", value):
+        return value
+
+    # Try dateutil (handles RFC 2822 and most formats)
+    try:
+        dt = dateparser.parse(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    except (ValueError, OverflowError):
+        pass
+
+    # Try common RSS date formats explicitly
+    for fmt in _RSS_DATE_FORMATS:
+        try:
+            dt = datetime.strptime(value, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+        except ValueError:
+            continue
+
+    logger.warning("Could not parse date: %s", value)
+    return None
+
 
 # Maps subscription type to content type stored in ES
 SUB_TYPE_TO_CONTENT_TYPE = {
@@ -37,10 +80,7 @@ def _parse_dlp_item(
 
     published_at = None
     if raw.get("published_date"):
-        try:
-            published_at = raw["published_date"]
-        except Exception:
-            pass
+        published_at = _normalize_date_to_iso(raw["published_date"])
 
     transcript = None
     if raw.get("transcript"):
@@ -170,24 +210,6 @@ async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
 
     items = _filter_by_age(items, settings.youtube_max_age_days)
 
-    # Fetch metadata + captions for each video via yt-dlp (one call per video)
-    # Also filters out livestreams
-    if items:
-        from backend.app.services.youtube_captions import fetch_video_metadata
-        non_live_items = []
-        for item in items:
-            try:
-                meta = fetch_video_metadata(item["url"])
-                if meta and meta["is_live"]:
-                    logger.info("Skipping livestream: %s", item["title"])
-                    continue
-                if meta and meta["captions"]:
-                    item["_transcript"] = meta["captions"]
-            except Exception as e:
-                logger.warning("Failed to fetch metadata for %s: %s", item["url"], e)
-            non_live_items.append(item)
-        items = non_live_items
-
     return items
 
 
@@ -262,21 +284,21 @@ async def _fetch_rss_feed(feed_url: str) -> list[dict[str, Any]]:
 
 def _filter_by_age(items: list[dict[str, Any]], max_age_days: int) -> list[dict[str, Any]]:
     """Filter items to only those published within max_age_days."""
-    from dateutil import parser as dateparser
-
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     filtered = []
     for item in items:
         pub = item.get("published_date")
         if pub:
-            try:
-                pub_dt = dateparser.parse(pub)
-                if pub_dt.tzinfo is None:
-                    pub_dt = pub_dt.replace(tzinfo=timezone.utc)
-                if pub_dt < cutoff:
-                    continue
-            except Exception:
-                pass
+            iso = _normalize_date_to_iso(pub)
+            if iso:
+                try:
+                    pub_dt = dateparser.parse(iso)
+                    if pub_dt.tzinfo is None:
+                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                    if pub_dt < cutoff:
+                        continue
+                except Exception:
+                    pass
         filtered.append(item)
     return filtered
 
@@ -336,12 +358,22 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             except Exception as e:
                 logger.warning("Failed to scrape %s: %s", doc["url"], e)
 
-        # For YouTube videos, use captions from feed parsing, fall back to content-dlp
+        # For YouTube videos, fetch metadata via yt-dlp to check for livestreams and get captions
+        if subscription.type == SubscriptionType.youtube_channel and doc["url"]:
+            from backend.app.services.youtube_captions import fetch_video_metadata
+            try:
+                meta = fetch_video_metadata(doc["url"])
+                if meta and meta["is_live"]:
+                    logger.info("Skipping livestream: %s", doc["title"])
+                    continue
+                if meta and meta["captions"]:
+                    doc["transcript"] = meta["captions"]
+            except Exception as e:
+                logger.warning("Failed to fetch metadata for %s: %s", doc["url"], e)
+
         if subscription.type == SubscriptionType.youtube_channel:
-            transcript = item_raw.get("_transcript")
-            if transcript:
-                doc["transcript"] = transcript
-            elif doc["url"]:
+            transcript = doc.get("transcript")
+            if not transcript and doc["url"]:
                 try:
                     logger.info("No captions available, falling back to content-dlp transcription for %s", doc["url"])
                     yt_data = await content_dlp.fetch_youtube(doc["url"], no_audio=False, transcript=True)
