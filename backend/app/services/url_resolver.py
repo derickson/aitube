@@ -162,6 +162,14 @@ def _parse_feed_metadata(body: str) -> dict:
     return meta
 
 
+def _strip_cdata(text: str) -> str:
+    """Remove CDATA wrappers that the HTML parser doesn't handle."""
+    s = text.strip()
+    if s.startswith("<![CDATA[") and s.endswith("]]>"):
+        s = s[9:-3].strip()
+    return s
+
+
 def _extract_sample_items(body: str, limit: int = 3) -> list[dict]:
     """Pull a few recent items from the feed XML for preview."""
     soup = BeautifulSoup(body, "html.parser")
@@ -172,7 +180,7 @@ def _extract_sample_items(body: str, limit: int = 3) -> list[dict]:
         title = item.find("title")
         pub = item.find("pubdate") or item.find("pubDate")
         items.append({
-            "title": title.get_text(strip=True) if title else "Untitled",
+            "title": _strip_cdata(title.get_text(strip=True)) if title else "Untitled",
             "published": pub.get_text(strip=True) if pub else None,
         })
 
@@ -182,7 +190,7 @@ def _extract_sample_items(body: str, limit: int = 3) -> list[dict]:
             title = entry.find("title")
             pub = entry.find("published") or entry.find("updated")
             items.append({
-                "title": title.get_text(strip=True) if title else "Untitled",
+                "title": _strip_cdata(title.get_text(strip=True)) if title else "Untitled",
                 "published": pub.get_text(strip=True) if pub else None,
             })
 
@@ -438,34 +446,40 @@ async def resolve_url(url: str) -> ResolvedFeed:
         )
 
     # --- Fallback: treat as a generic website / RSS candidate ---
-    # Try common feed paths
+    # Try common feed paths relative to the user-provided URL first, then domain root
     parsed = urlparse(url)
     base = f"{parsed.scheme}://{parsed.netloc}"
-    common_paths = ["/feed", "/rss", "/atom.xml", "/feed.xml", "/rss.xml", "/index.xml"]
+    user_path = url.rstrip("/")
+    bases_to_try = [user_path] if user_path != base else [base]
+    if user_path != base:
+        bases_to_try.append(base)
+    common_suffixes = ["/feed", "/rss", "/atom.xml", "/feed.xml", "/rss.xml", "/index.xml"]
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
-        for path in common_paths:
-            try:
-                probe = await client.get(f"{base}{path}", headers={"User-Agent": "AITube/0.1"})
-                if probe.status_code == 200 and _looks_like_feed(
-                    probe.headers.get("content-type", ""), probe.text
-                ):
-                    feed_body = probe.text
-                    feed_meta = _parse_feed_metadata(feed_body)
-                    sample = _extract_sample_items(feed_body)
-                    is_podcast = bool(re.search(r'<enclosure[^>]+type=["\']audio/', feed_body, re.IGNORECASE))
+        for b in bases_to_try:
+            for suffix in common_suffixes:
+                try:
+                    probe_url = f"{b}{suffix}"
+                    probe = await client.get(probe_url, headers={"User-Agent": "AITube/0.1"})
+                    if probe.status_code == 200 and _looks_like_feed(
+                        probe.headers.get("content-type", ""), probe.text
+                    ):
+                        feed_body = probe.text
+                        feed_meta = _parse_feed_metadata(feed_body)
+                        sample = _extract_sample_items(feed_body)
+                        is_podcast = bool(re.search(r'<enclosure[^>]+type=["\']audio/', feed_body, re.IGNORECASE))
 
-                    return ResolvedFeed(
-                        url=url,
-                        feed_url=f"{base}{path}",
-                        type="podcast" if is_podcast else "rss",
-                        name=feed_meta.get("name") or html_meta.get("name", parsed.netloc),
-                        description=feed_meta.get("description") or html_meta.get("description", ""),
-                        thumbnail_url=feed_meta.get("thumbnail_url") or html_meta.get("thumbnail_url", ""),
-                        sample_items=sample,
-                    )
-            except Exception:
-                continue
+                        return ResolvedFeed(
+                            url=url,
+                            feed_url=probe_url,
+                            type="podcast" if is_podcast else "rss",
+                            name=feed_meta.get("name") or html_meta.get("name", parsed.netloc),
+                            description=feed_meta.get("description") or html_meta.get("description", ""),
+                            thumbnail_url=feed_meta.get("thumbnail_url") or html_meta.get("thumbnail_url", ""),
+                            sample_items=sample,
+                        )
+                except Exception:
+                    continue
 
     # Nothing found — return as generic RSS with HTML metadata
     return ResolvedFeed(

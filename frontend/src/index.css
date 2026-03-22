@@ -565,6 +565,20 @@ main:has(.flyout-open) {
   word-break: break-all;
 }
 
+.preview-warning {
+  font-size: 0.85rem;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+}
+
+:root.dark .preview-warning,
+[data-theme="dark"] .preview-warning {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+}
+
 .preview-samples {
   border-top: 1px solid var(--border);
   padding-top: 0.5rem;

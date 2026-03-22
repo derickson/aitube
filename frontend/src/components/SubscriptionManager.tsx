@@ -246,7 +246,7 @@ export function SubscriptionManager() {
                 </div>
               </div>
 
-              {preview.sample_items.length > 0 && (
+              {preview.sample_items.length > 0 ? (
                 <div className="preview-samples">
                   <div className="preview-samples-label">Recent items:</div>
                   <ul>
@@ -259,6 +259,10 @@ export function SubscriptionManager() {
                       </li>
                     ))}
                   </ul>
+                </div>
+              ) : preview.type === "rss" && (
+                <div className="preview-warning">
+                  No RSS or Atom feed was found at this URL. You can still subscribe, but polling may not find any articles.
                 </div>
               )}
 
