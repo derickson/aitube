@@ -285,7 +285,7 @@ export function Timeline() {
           ) : items.length === 0 ? (
             <p className="empty-text">
               {total === 0
-                ? "No content yet. Add subscriptions and poll for new content."
+                ? "Nothing to watch right now. New content from your subscriptions is checked every 30 minutes, or you can add more subscriptions to expand your feed."
                 : "No items match your filters."}
             </p>
           ) : (
