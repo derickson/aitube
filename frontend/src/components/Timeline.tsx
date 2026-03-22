@@ -4,6 +4,7 @@ import {
   listSubscriptions,
   batchPlaybackProgress,
   setInterest as apiSetInterest,
+  setConsumed as apiSetConsumed,
   type ContentItem,
   type ContentType,
   type ContentSearchResponse,
@@ -58,7 +59,10 @@ export function Timeline() {
 
   const fetchDataRef = useRef<() => void>(undefined);
 
-  const handleConsumedChange = useCallback((itemId: string, consumed: boolean) => {
+  const handleConsumedChange = useCallback((itemId: string, consumed: boolean, callApi = false) => {
+    if (callApi) {
+      apiSetConsumed(itemId, consumed).catch(() => {});
+    }
     setConsumedIds((prev) => {
       const next = new Set(prev);
       if (consumed) next.add(itemId);
@@ -251,6 +255,7 @@ export function Timeline() {
                   progress={progress[item.id]}
                   onSelect={() => setSelectedId(item.id === selectedId ? null : item.id)}
                   onInterest={handleInterestChange}
+                  onToggleConsumed={handleConsumedChange}
                 />
               ))}
             </div>
@@ -277,6 +282,7 @@ function ContentCard({
   progress,
   onSelect,
   onInterest,
+  onToggleConsumed,
 }: {
   item: ContentItem;
   subName: string;
@@ -285,6 +291,7 @@ function ContentCard({
   progress?: PlaybackProgress;
   onSelect: () => void;
   onInterest: (itemId: string, value: "up" | "down" | "none") => void;
+  onToggleConsumed: (itemId: string, consumed: boolean, callApi: boolean) => void;
 }) {
   const description =
     item.summary ||
@@ -302,6 +309,11 @@ function ContentCard({
   const handleInterestClick = (e: React.MouseEvent, value: "up" | "down") => {
     e.stopPropagation();
     onInterest(item.id, item.user_interest === value ? "none" : value);
+  };
+
+  const handleConsumedClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleConsumed(item.id, !isConsumed, true);
   };
 
   return (
@@ -339,6 +351,13 @@ function ContentCard({
             {TYPE_LABELS[item.type]}
           </span>
           <span className="content-interest-btns">
+            <button
+              className={`interest-btn interest-consumed${isConsumed ? " active" : ""}`}
+              onClick={handleConsumedClick}
+              title={isConsumed ? "Mark unwatched" : "Mark viewed"}
+            >
+              &#10003;
+            </button>
             <button
               className={`interest-btn interest-up${item.user_interest === "up" ? " active" : ""}`}
               onClick={(e) => handleInterestClick(e, "up")}

@@ -1030,6 +1030,12 @@ main:has(.flyout-open) {
   border-color: var(--text);
 }
 
+.interest-consumed.active {
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
+
 .interest-up.active {
   background: var(--success);
   color: #fff;
