@@ -585,6 +585,118 @@ async def deduplicate_recent_items(days: int = 7) -> int:
     return len(to_delete)
 
 
+async def backfill_missing_transcripts(limit: int = 5) -> int:
+    """Retry caption fetch for recent YouTube videos missing transcripts.
+
+    Only uses yt-dlp captions (not content-dlp transcription) to stay lightweight.
+    Processes at most `limit` videos per cycle to avoid YouTube rate limits.
+    Returns the number of videos successfully backfilled.
+    """
+    from backend.app.services.youtube_captions import fetch_video_metadata
+    from backend.app.services.summarizer import summarize_content
+
+    es = get_es_client()
+    # transcript field is "enabled: false" so we can't filter on it in ES;
+    # fetch recent videos and filter in Python
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"type": "video"}},
+                        {"range": {"discovered_at": {"gte": "now-14d"}}},
+                    ],
+                }
+            },
+            "_source": ["title", "url", "type", "transcript", "metadata", "summary"],
+            "size": 200,
+        },
+    )
+
+    # Filter to videos with no transcript
+    candidates = []
+    for hit in resp["hits"]["hits"]:
+        src = hit["_source"]
+        transcript = src.get("transcript")
+        has_transcript = (
+            isinstance(transcript, dict)
+            and transcript.get("text")
+        )
+        if not has_transcript:
+            candidates.append(hit)
+
+    if not candidates:
+        return 0
+
+    backfilled = 0
+    for hit in candidates[:limit]:
+        doc_id = hit["_id"]
+        src = hit["_source"]
+        title = src.get("title", "?")
+        url = src.get("url", "")
+        if not url:
+            continue
+
+        try:
+            transcript = None
+
+            # Try yt-dlp captions first
+            meta = fetch_video_metadata(url)
+            if meta and meta.get("captions"):
+                transcript = meta["captions"]
+
+            # Fall back to content-dlp transcription (handles 429 rate limits on yt-dlp)
+            if not transcript:
+                try:
+                    yt_data = await content_dlp.fetch_youtube(url, no_audio=False, transcript=True)
+                    if yt_data.get("transcript"):
+                        t = yt_data["transcript"]
+                        transcript = t if isinstance(t, dict) else {"text": t, "chunks": []}
+                except Exception as e:
+                    logger.warning("Backfill: content-dlp also failed for '%s': %s", title[:60], e)
+
+            if not transcript:
+                continue
+            update_fields: dict[str, Any] = {"transcript": transcript}
+
+            # Re-generate summary with transcript timestamps
+            transcript_text = transcript.get("text", "") if isinstance(transcript, dict) else ""
+            transcript_chunks = transcript.get("chunks") if isinstance(transcript, dict) else None
+            description = src.get("metadata", {}).get("description", "")
+            author = src.get("metadata", {}).get("author", "")
+
+            new_summary = await summarize_content(
+                title=title,
+                content_type="video",
+                transcript_text=transcript_text,
+                description=description,
+                author=author,
+                transcript_chunks=transcript_chunks,
+            )
+            if new_summary:
+                update_fields["summary"] = new_summary
+
+            # Also backfill duration if missing
+            if not hit["_source"].get("duration_seconds") and meta.get("duration"):
+                update_fields["duration_seconds"] = meta["duration"]
+
+            await es.update(
+                index=CONTENT_ITEMS_INDEX,
+                id=doc_id,
+                body={"doc": update_fields},
+            )
+            backfilled += 1
+            logger.info("Backfill: fetched transcript for '%s' (%s)", title[:60], doc_id)
+
+        except Exception as e:
+            logger.warning("Backfill: failed for '%s' (%s): %s", title[:60], doc_id, e)
+
+    if backfilled:
+        logger.info("Backfilled transcripts for %d video(s)", backfilled)
+    return backfilled
+
+
 async def poll_all_active() -> dict[str, list[str]]:
     """Poll all active subscriptions. Returns {subscription_id: [new_content_ids]}."""
     es = get_es_client()
@@ -618,5 +730,8 @@ async def poll_all_active() -> dict[str, list[str]]:
 
     # Clean up any duplicate content items from recent polls
     await deduplicate_recent_items()
+
+    # Retry transcript fetch for videos that failed on initial poll
+    await backfill_missing_transcripts()
 
     return results
