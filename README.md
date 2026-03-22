@@ -4,36 +4,48 @@ Personal feed reader for YouTube, podcasts, and RSS with AI-powered curation. On
 
 ## Stack
 
-- **Backend:** Python 3.12 / FastAPI / FastMCP
-- **Frontend:** React / Vite / TypeScript
-- **Data:** Elasticsearch Serverless
-- **Ingestion:** content-dlp CLI + yt-dlp for YouTube captions
-- **AI:** Claude Sonnet 4.6 for summaries, ad detection, and interest scoring
+- **Backend:** Python 3.12 / FastAPI
+- **Frontend:** React 19 / Vite / TypeScript
+- **Data:** Elasticsearch
+- **Ingestion:** content-dlp HTTP service + yt-dlp for YouTube captions
+- **AI:** Claude Sonnet for summaries, ad detection, and interest scoring
 
 ## Setup
 
-### Backend
+### Quick Start (recommended)
 
-Requires [uv](https://docs.astral.sh/uv/).
+Requires [uv](https://docs.astral.sh/uv/) and Node.js 22+.
 
 ```bash
-# Install dependencies (venv lives at ~/.venvs/aitube)
-# Set UV_PROJECT_ENVIRONMENT=~/.venvs/aitube or use .env.uv
-uv sync
+# Install all dependencies (frontend + backend)
+make init
 
 # Copy and configure environment variables
 cp .env.example .env
 # Edit .env with your Elasticsearch and Anthropic API keys
 
+# Start dev servers with hot reload (backend :3103, frontend :8103)
+make dev
+
+# Stop servers
+make stop
+```
+
+### Manual Setup
+
+#### Backend
+
+```bash
+# Install dependencies (venv lives at ~/.venvs/aitube)
+uv sync
+
 # Run the dev server
-UV_PROJECT_ENVIRONMENT=~/.venvs/aitube uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 3103 --reload
+uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 3103 --reload
 ```
 
 The API starts at `http://localhost:3103`. Health check: `GET /health`.
 
-### Frontend
-
-Requires Node.js 22+.
+#### Frontend
 
 ```bash
 cd frontend
@@ -58,10 +70,16 @@ The frontend is hosted under the `/aitube/` path, making it easy to serve alongs
 
 ### Cron
 
-Poll feeds automatically every 30 minutes:
+Poll feeds automatically every 30 minutes (adjust paths for your environment):
 
 ```
-*/30 * * * * cd /home/dave/dev/aitube && UV_PROJECT_ENVIRONMENT=/home/dave/.venvs/aitube /home/dave/.venvs/aitube/bin/python -m backend.scripts.poll_feeds >> /home/dave/dev/aitube/cron.log 2>&1
+*/30 * * * * cd /path/to/aitube && uv run python -m backend.scripts.poll_feeds >> /path/to/aitube/cron.log 2>&1
+```
+
+Or poll manually:
+
+```bash
+uv run python -m backend.scripts.poll_feeds
 ```
 
 ## Configuration
@@ -70,12 +88,13 @@ Set in `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ELASTICSEARCH_URL` | `http://localhost:9200` | ES Serverless endpoint |
-| `ELASTICSEARCH_API_KEY` | | ES API key |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch endpoint |
+| `ELASTICSEARCH_API_KEY` | | Elasticsearch API key |
 | `ANTHROPIC_API_KEY` | | Claude API key for summaries and ad detection |
+| `CONTENT_DLP_URL` | `http://localhost:7055` | content-dlp HTTP service URL |
 | `YOUTUBE_MAX_AGE_DAYS` | `5` | Only poll YouTube videos newer than this |
 | `PODCAST_MAX_AGE_DAYS` | `5` | Only poll podcast episodes newer than this |
-| `RSS_MAX_AGE_DAYS` | `120` | Only poll RSS articles newer than this |
+| `RSS_MAX_AGE_DAYS` | `90` | Only poll RSS articles newer than this |
 
 ## Adding Subscriptions
 
@@ -91,8 +110,8 @@ The resolver fetches the feed name, thumbnail, description, and sample items for
 
 When new content is discovered during polling:
 
-1. **YouTube videos:** captions fetched via yt-dlp (instant, no download). Falls back to content-dlp Parakeet transcription if captions unavailable.
-2. **Podcast episodes:** audio downloaded and transcribed locally via content-dlp Parakeet TDT. Claude detects ads in the first 90 seconds and sets the playback position to skip past them.
+1. **YouTube videos:** captions fetched via yt-dlp (instant, no download). Falls back to content-dlp transcription if captions unavailable.
+2. **Podcast episodes:** audio downloaded and transcribed locally via content-dlp. Claude detects ads in the first 90 seconds and sets the playback position to skip past them.
 3. **RSS articles:** full page scraped to markdown via content-dlp webscrape.
 4. **All types:** Claude generates a 2-3 sentence summary that cuts through clickbait to explain the actual topic, opinion, or thesis.
 
@@ -123,14 +142,13 @@ backend/
       polling.py         # Feed poll triggers
     services/
       elasticsearch.py   # ES client, index mappings, lifecycle
-      content_dlp.py     # Async wrapper for content-dlp CLI
+      content_dlp.py     # HTTP client for content-dlp service on host
       feed_poller.py     # Poll subscriptions, transcribe, summarize
       url_resolver.py    # Smart URL resolution
       youtube_captions.py # yt-dlp caption fetching
       ad_detector.py     # Claude-powered podcast ad detection
       summarizer.py      # Claude-powered content summaries
     models/              # Pydantic schemas
-    mcp/                 # FastMCP tool definitions
   scripts/
     poll_feeds.py        # Crontab entry point
 frontend/
@@ -163,9 +181,9 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | PUT | `/api/content/{id}/consumed/` | Set consumed status |
 | PUT | `/api/content/{id}/interest/` | Set interest (up/down/none) |
 | POST | `/api/content/{id}/transcribe/` | Trigger transcription for a content item |
+| DELETE | `/api/content/{id}/` | Delete content item |
 | POST | `/api/content/playback-progress/` | Batch get playback progress |
 | GET | `/api/playback/{id}/` | Get playback position |
 | PUT | `/api/playback/{id}/` | Update playback position |
 | POST | `/api/polling/trigger/` | Trigger feed poll (all active subscriptions) |
 | POST | `/api/polling/trigger/{id}/` | Trigger feed poll (single subscription) |
-| DELETE | `/api/content/{id}/` | Delete content item |
