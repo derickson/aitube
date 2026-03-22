@@ -119,6 +119,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
             initialPosition={playback?.position_seconds ?? 0}
             seekRef={videoSeekRef}
             onTimeUpdate={setCurrentTime}
+            onConsumed={() => { setConsumed(true); onConsumedChange?.(itemId, true); }}
           />
         )}
         {item.type === "podcast_episode" && (
@@ -127,6 +128,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
             initialPosition={playback?.position_seconds ?? 0}
             seekRef={audioSeekRef}
             onTimeUpdate={setCurrentTime}
+            onConsumed={() => { setConsumed(true); onConsumedChange?.(itemId, true); }}
           />
         )}
       </div>
@@ -143,7 +145,10 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
         )}
 
         {item.type === "article" && (
-          <ArticleReader item={item} />
+          <ArticleReader item={item} onConsumed={() => {
+            setConsumed(true);
+            onConsumedChange?.(itemId, true);
+          }} />
         )}
 
         {hasTranscript && item.transcript && (
@@ -189,17 +194,22 @@ function YouTubePlayer({
   initialPosition,
   seekRef,
   onTimeUpdate,
+  onConsumed,
 }: {
   item: ContentItem;
   initialPosition: number;
   seekRef?: React.MutableRefObject<((time: number) => void) | null>;
   onTimeUpdate?: (time: number) => void;
+  onConsumed?: () => void;
 }) {
   const videoId = extractVideoId(item.url);
   const playerRef = useRef<YT.Player | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const timeIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const [ready, setReady] = useState(false);
+  const consumedFiredRef = useRef(false);
+  const onConsumedRef = useRef(onConsumed);
+  onConsumedRef.current = onConsumed;
 
   // Expose seek function to parent via ref
   useEffect(() => {
@@ -246,6 +256,11 @@ function YouTubePlayer({
             stopTracking();
             stopTimeUpdates();
             reportPosition();
+            if (event.data === YT.PlayerState.ENDED && !consumedFiredRef.current) {
+              consumedFiredRef.current = true;
+              apiSetConsumed(item.id, true).catch(() => {});
+              onConsumedRef.current?.();
+            }
           }
         },
       },
@@ -283,10 +298,19 @@ function YouTubePlayer({
     timeIntervalRef.current = setInterval(() => {
       const player = playerRef.current;
       if (player && typeof player.getCurrentTime === "function") {
-        onTimeUpdate?.(player.getCurrentTime());
+        const current = player.getCurrentTime();
+        onTimeUpdate?.(current);
+        if (!consumedFiredRef.current && typeof player.getDuration === "function") {
+          const duration = player.getDuration();
+          if (duration > 0 && current / duration >= 0.9) {
+            consumedFiredRef.current = true;
+            apiSetConsumed(item.id, true).catch(() => {});
+            onConsumedRef.current?.();
+          }
+        }
       }
     }, 500);
-  }, [onTimeUpdate]);
+  }, [onTimeUpdate, item.id]);
 
   const stopTimeUpdates = useCallback(() => {
     if (timeIntervalRef.current) {
@@ -311,15 +335,20 @@ function AudioPlayer({
   initialPosition,
   seekRef,
   onTimeUpdate,
+  onConsumed,
 }: {
   item: ContentItem;
   initialPosition: number;
   seekRef?: React.MutableRefObject<((time: number) => void) | null>;
   onTimeUpdate?: (time: number) => void;
+  onConsumed?: () => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const hasSeekRef = useRef(false);
+  const consumedFiredRef = useRef(false);
+  const onConsumedRef = useRef(onConsumed);
+  onConsumedRef.current = onConsumed;
 
   const extras = (item.metadata as Record<string, Record<string, unknown>>)?.extras;
   const audioUrl = extras?.enclosure_url ? String(extras.enclosure_url) : item.url;
@@ -397,9 +426,25 @@ function AudioPlayer({
         onLoadedMetadata={handleLoadedMetadata}
         onPlay={startTracking}
         onPause={() => { stopTracking(); reportPosition(); }}
-        onEnded={() => { stopTracking(); reportPosition(); }}
+        onEnded={() => {
+          stopTracking(); reportPosition();
+          if (!consumedFiredRef.current) {
+            consumedFiredRef.current = true;
+            apiSetConsumed(item.id, true).catch(() => {});
+            onConsumedRef.current?.();
+          }
+        }}
         onTimeUpdate={() => {
-          if (audioRef.current) onTimeUpdate?.(audioRef.current.currentTime);
+          if (audioRef.current) {
+            const current = audioRef.current.currentTime;
+            const duration = audioRef.current.duration;
+            onTimeUpdate?.(current);
+            if (!consumedFiredRef.current && duration > 0 && current / duration >= 0.9) {
+              consumedFiredRef.current = true;
+              apiSetConsumed(item.id, true).catch(() => {});
+              onConsumedRef.current?.();
+            }
+          }
         }}
       />
       {initialPosition > 0 && (
@@ -434,7 +479,7 @@ function TranscriptViewer({
   useEffect(() => {
     if (activeIndex >= 0 && activeIndex !== lastScrolledIndex.current && activeRef.current) {
       lastScrolledIndex.current = activeIndex;
-      activeRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      activeRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [activeIndex]);
 
@@ -468,9 +513,15 @@ function TranscriptViewer({
   );
 }
 
-function ArticleReader({ item }: { item: ContentItem }) {
+function ArticleReader({ item, onConsumed }: { item: ContentItem; onConsumed?: () => void }) {
+  const onConsumedRef = useRef(onConsumed);
+  onConsumedRef.current = onConsumed;
+
   useEffect(() => {
-    if (item.id) apiSetConsumed(item.id, true).catch(() => {});
+    if (item.id) {
+      apiSetConsumed(item.id, true).catch(() => {});
+      onConsumedRef.current?.();
+    }
   }, [item.id]);
 
   const markdown = item.content_markdown;

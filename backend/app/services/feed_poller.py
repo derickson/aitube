@@ -219,6 +219,8 @@ def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
     title = title_tag.get_text(strip=True) if title_tag else "Untitled"
 
     # RSS: <link> text, Atom: <link href="">
+    # Note: BeautifulSoup's HTML parser treats <link> as void/self-closing,
+    # so text content is lost. Fall back to <guid> which often contains the URL.
     link_tag = item.find("link")
     url = ""
     if link_tag:
@@ -227,6 +229,10 @@ def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
     # GUID as external ID, fallback to URL
     guid_tag = item.find("guid") or item.find("id")
     guid = guid_tag.get_text(strip=True) if guid_tag else url
+
+    # If link parsing failed, use guid as URL if it looks like one
+    if not url and guid and guid.startswith("http"):
+        url = guid
     # Create a stable short ID
     import hashlib
     external_id = f"rss_{hashlib.md5(guid.encode()).hexdigest()[:12]}"
@@ -357,6 +363,18 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                 doc["content_dlp_cache_id"] = scraped.get("content_id", "")
             except Exception as e:
                 logger.warning("Failed to scrape %s: %s", doc["url"], e)
+
+            # Clean up scraped markdown (remove nav/footer garbage)
+            if doc.get("content_markdown"):
+                from backend.app.services.content_cleanup import cleanup_article_markdown
+                try:
+                    result = await cleanup_article_markdown(doc["content_markdown"], doc["title"])
+                    doc["content_markdown"] = result["markdown"]
+                    # Use extracted image as thumbnail if feed didn't provide one
+                    if not doc.get("thumbnail_url") and result.get("image_url"):
+                        doc["thumbnail_url"] = result["image_url"]
+                except Exception as e:
+                    logger.warning("Failed to clean up article %s: %s", doc["title"], e)
 
         # For YouTube videos, fetch metadata via yt-dlp to check for livestreams and get captions
         if subscription.type == SubscriptionType.youtube_channel and doc["url"]:

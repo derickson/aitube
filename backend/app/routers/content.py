@@ -80,31 +80,21 @@ async def list_content(
     else:
         query = {"match_all": {}}
 
-    # Filtered search for results
+    # Filtered search for results with aggregations
     search_body: dict[str, Any] = {
         "query": query,
         "size": size,
         "from": offset,
         "sort": [{"published_at": {"order": "desc", "missing": "_last"}}],
+        "aggs": {
+            "type": {"terms": {"field": "type", "size": 10}},
+            "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
+            "consumed": {"terms": {"field": "consumed", "missing": False}},
+            "interest": {"terms": {"field": "user_interest", "size": 10}},
+        },
     }
 
-    # Unfiltered aggregation for global facet counts
-    global_aggs = {
-        "type": {"terms": {"field": "type", "size": 10}},
-        "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
-        "consumed": {"terms": {"field": "consumed", "missing": False}},
-        "interest": {"terms": {"field": "user_interest", "size": 10}},
-    }
-    aggs_body: dict[str, Any] = {
-        "size": 0,
-        "aggs": global_aggs,
-    }
-
-    import asyncio
-    search_resp, aggs_resp = await asyncio.gather(
-        es.search(index=CONTENT_ITEMS_INDEX, body=search_body),
-        es.search(index=CONTENT_ITEMS_INDEX, body=aggs_body),
-    )
+    search_resp = await es.search(index=CONTENT_ITEMS_INDEX, body=search_body)
 
     hits = search_resp["hits"]["hits"]
     items: list[ContentItem] = []
@@ -114,9 +104,9 @@ async def list_content(
     total_hits = search_resp["hits"]["total"]
     total = total_hits["value"] if isinstance(total_hits, dict) else total_hits
 
-    # Build facets from unfiltered aggregations
+    # Build facets from filtered aggregations
     facets: dict[str, list[FacetBucket]] = {}
-    for agg_name, agg_data in aggs_resp.get("aggregations", {}).items():
+    for agg_name, agg_data in search_resp.get("aggregations", {}).items():
         if agg_name == "consumed":
             watched = 0
             unwatched = 0
