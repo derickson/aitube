@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 
 import { Timeline } from "./components/Timeline";
 import { SubscriptionManager } from "./components/SubscriptionManager";
+import { NotFound } from "./components/NotFound";
 import { ThemeToggle } from "./theme/ThemeToggle";
 import { getInitialTheme, applyTheme } from "./theme/theme";
 import type { Theme } from "./theme/theme";
@@ -36,6 +37,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Timeline />} />
           <Route path="/subscriptions/" element={<SubscriptionManager />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
     </>

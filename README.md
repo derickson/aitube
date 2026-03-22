@@ -1,5 +1,7 @@
 # AITube
 
+![AITube Screenshot](splash.jpg)
+
 Personal feed reader for YouTube, podcasts, and RSS with AI-powered curation. One unified timeline, no algorithms.
 
 ## Stack
@@ -8,7 +10,7 @@ Personal feed reader for YouTube, podcasts, and RSS with AI-powered curation. On
 - **Frontend:** React 19 / Vite / TypeScript
 - **Data:** Elasticsearch
 - **Ingestion:** content-dlp HTTP service + yt-dlp for YouTube captions
-- **AI:** Claude Sonnet for summaries, ad detection, and interest scoring
+- **AI:** Claude Sonnet for summaries, ad detection, interest scoring, and content chat
 
 ## Setup
 
@@ -117,8 +119,9 @@ When new content is discovered during polling:
 
 ## Features
 
-- **Unified timeline** with faceted search (type, watched/unwatched, interest) powered by Elasticsearch
+- **Unified timeline** with faceted search (type, watched/unwatched, interest, source) powered by Elasticsearch
 - **Flyout content viewer** with embedded YouTube player, HTML5 audio player, and distraction-free article reader
+- **Content chat** — ask questions about any content item with streaming AI responses; configurable agents with clickable timestamp citations for video/podcast seek
 - **Timestamped transcripts** with live playback highlighting and click-to-seek
 - **Playback tracking** with resume from last position and 90% auto-complete
 - **Interest voting** (up/down) per content item to mark what's interesting
@@ -140,6 +143,7 @@ backend/
       content.py         # Search, facets, CSV export, interest, consumed
       playback.py        # Position tracking
       polling.py         # Feed poll triggers
+      chat.py            # Streaming content Q&A with agents
     services/
       elasticsearch.py   # ES client, index mappings, lifecycle
       content_dlp.py     # HTTP client for content-dlp service on host
@@ -148,14 +152,20 @@ backend/
       youtube_captions.py # yt-dlp caption fetching
       ad_detector.py     # Claude-powered podcast ad detection
       summarizer.py      # Claude-powered content summaries
+      content_cleanup.py # Two-stage article cleanup (regex + LLM)
+      agents.py          # Agent registry for content chat
     models/              # Pydantic schemas
   scripts/
     poll_feeds.py        # Crontab entry point
 frontend/
+  public/
+    images/              # Pixel art assets (logo, empty states)
   src/
     components/
       Timeline.tsx           # Content grid with facet sidebar
       ContentView.tsx        # Flyout player/reader with transcript
+      ContentTabs.tsx        # Tab switcher for content view panels
+      ChatPanel.tsx          # Streaming chat for content Q&A
       SubscriptionManager.tsx # Subscription CRUD with URL resolver
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
@@ -187,3 +197,5 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | PUT | `/api/playback/{id}/` | Update playback position |
 | POST | `/api/polling/trigger/` | Trigger feed poll (all active subscriptions) |
 | POST | `/api/polling/trigger/{id}/` | Trigger feed poll (single subscription) |
+| GET | `/api/chat/agents/` | List available chat agents |
+| POST | `/api/chat/{item_id}/stream/` | Stream chat response for a content item |
