@@ -34,7 +34,7 @@ class ResolvedPreview(BaseModel):
     sample_items: list[dict] = []
 
 
-@router.post("/resolve", response_model=ResolvedPreview)
+@router.post("/resolve/", response_model=ResolvedPreview)
 async def resolve_subscription_url(data: ResolveRequest):
     """Resolve a raw URL into subscription metadata for preview."""
     try:
@@ -52,7 +52,7 @@ async def resolve_subscription_url(data: ResolveRequest):
     )
 
 
-@router.post("", response_model=Subscription)
+@router.post("/", response_model=Subscription)
 async def create_subscription(data: SubscriptionCreate):
     es = get_es_client()
     doc_id = str(uuid.uuid4())
@@ -71,7 +71,7 @@ class SubscriptionWithCount(Subscription):
     content_count: int = 0
 
 
-@router.get("", response_model=list[SubscriptionWithCount])
+@router.get("/", response_model=list[SubscriptionWithCount])
 async def list_subscriptions():
     es = get_es_client()
 
@@ -106,7 +106,7 @@ async def list_subscriptions():
     return results
 
 
-@router.get("/{sub_id}", response_model=Subscription)
+@router.get("/{sub_id}/", response_model=Subscription)
 async def get_subscription(sub_id: str):
     es = get_es_client()
     try:
@@ -116,7 +116,7 @@ async def get_subscription(sub_id: str):
     return Subscription(id=resp["_id"], **resp["_source"])
 
 
-@router.patch("/{sub_id}", response_model=Subscription)
+@router.patch("/{sub_id}/", response_model=Subscription)
 async def update_subscription(sub_id: str, data: SubscriptionUpdate):
     es = get_es_client()
     updates = data.model_dump(exclude_none=True)
@@ -127,7 +127,7 @@ async def update_subscription(sub_id: str, data: SubscriptionUpdate):
     return Subscription(id=resp["_id"], **resp["_source"])
 
 
-@router.delete("/{sub_id}")
+@router.delete("/{sub_id}/")
 async def delete_subscription(sub_id: str):
     es = get_es_client()
     await es.delete(index=SUBSCRIPTIONS_INDEX, id=sub_id)

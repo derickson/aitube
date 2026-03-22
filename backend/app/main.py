@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     await close_es_client()
 
 
-app = FastAPI(title="AITube", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AITube", version="0.1.0", lifespan=lifespan, redirect_slashes=False)
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,7 +38,7 @@ app.include_router(playback.router)
 app.include_router(polling.router)
 
 
-@app.get("/health")
+@app.get("/health/")
 async def health():
     return {"status": "ok"}
 

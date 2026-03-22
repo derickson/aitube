@@ -24,7 +24,7 @@ class ContentSearchResponse(BaseModel):
     facets: dict[str, list[FacetBucket]]
 
 
-@router.get("", response_model=ContentSearchResponse)
+@router.get("/", response_model=ContentSearchResponse)
 async def list_content(
     subscription_id: str | None = None,
     content_type: str | None = None,
@@ -139,7 +139,7 @@ async def list_content(
     return ContentSearchResponse(items=items, total=total, facets=facets)
 
 
-@router.get("/{item_id}", response_model=ContentItem)
+@router.get("/{item_id}/", response_model=ContentItem)
 async def get_content_item(item_id: str):
     es = get_es_client()
     try:
@@ -149,7 +149,7 @@ async def get_content_item(item_id: str):
     return ContentItem(id=resp["_id"], **resp["_source"])
 
 
-@router.post("/{item_id}/transcribe")
+@router.post("/{item_id}/transcribe/")
 async def transcribe_content_item(item_id: str):
     """Trigger transcription for a content item. Downloads audio and runs local Parakeet TDT."""
     from backend.app.services import content_dlp
@@ -203,14 +203,14 @@ async def transcribe_content_item(item_id: str):
     return {"status": "ok", "transcript_length": len(transcript.get("text", ""))}
 
 
-@router.put("/{item_id}/consumed")
+@router.put("/{item_id}/consumed/")
 async def set_consumed(item_id: str, consumed: bool = True):
     es = get_es_client()
     await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"consumed": consumed})
     return {"id": item_id, "consumed": consumed}
 
 
-@router.put("/{item_id}/interest")
+@router.put("/{item_id}/interest/")
 async def set_interest(item_id: str, interest: str = "up"):
     """Set interest on a content item: 'up', 'down', or 'none' to clear."""
     es = get_es_client()
@@ -226,7 +226,7 @@ async def set_interest(item_id: str, interest: str = "up"):
     return {"id": item_id, "interest": interest if interest != "none" else None}
 
 
-@router.post("/playback-progress")
+@router.post("/playback-progress/")
 async def batch_playback_progress(item_ids: list[str]):
     """Get playback progress for multiple content items at once."""
     if not item_ids:
@@ -269,7 +269,7 @@ async def batch_playback_progress(item_ids: list[str]):
     return result
 
 
-@router.get("/export/csv")
+@router.get("/export/csv/")
 async def export_csv():
     """Export all content items as CSV using ES scroll cursor."""
     from fastapi.responses import StreamingResponse
@@ -330,7 +330,7 @@ async def export_csv():
     )
 
 
-@router.delete("/{item_id}")
+@router.delete("/{item_id}/")
 async def delete_content_item(item_id: str):
     es = get_es_client()
     await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)

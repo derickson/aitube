@@ -85,18 +85,18 @@ export interface ResolvedPreview {
 // --- Subscriptions ---
 
 export function resolveUrl(url: string): Promise<ResolvedPreview> {
-  return apiFetch("/subscriptions/resolve", {
+  return apiFetch("/subscriptions/resolve/", {
     method: "POST",
     body: JSON.stringify({ url }),
   });
 }
 
 export function listSubscriptions(): Promise<Subscription[]> {
-  return apiFetch("/subscriptions");
+  return apiFetch("/subscriptions/");
 }
 
 export function getSubscription(id: string): Promise<Subscription> {
-  return apiFetch(`/subscriptions/${id}`);
+  return apiFetch(`/subscriptions/${id}/`);
 }
 
 export function createSubscription(data: {
@@ -106,7 +106,7 @@ export function createSubscription(data: {
   description?: string;
   interest_notes?: string;
 }): Promise<Subscription> {
-  return apiFetch("/subscriptions", {
+  return apiFetch("/subscriptions/", {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -121,14 +121,14 @@ export function updateSubscription(
     status?: SubscriptionStatus;
   },
 ): Promise<Subscription> {
-  return apiFetch(`/subscriptions/${id}`, {
+  return apiFetch(`/subscriptions/${id}/`, {
     method: "PATCH",
     body: JSON.stringify(data),
   });
 }
 
 export function deleteSubscription(id: string): Promise<{ deleted: string }> {
-  return apiFetch(`/subscriptions/${id}`, { method: "DELETE" });
+  return apiFetch(`/subscriptions/${id}/`, { method: "DELETE" });
 }
 
 // --- Content ---
@@ -162,23 +162,23 @@ export function searchContent(params?: {
   if (params?.size !== undefined) search.set("size", String(params.size));
   if (params?.offset !== undefined) search.set("offset", String(params.offset));
   const qs = search.toString();
-  return apiFetch(`/content${qs ? `?${qs}` : ""}`);
+  return apiFetch(`/content/${qs ? `?${qs}` : ""}`);
 }
 
 export function getContentItem(id: string): Promise<ContentItem> {
-  return apiFetch(`/content/${id}`);
+  return apiFetch(`/content/${id}/`);
 }
 
 export function transcribeContentItem(id: string): Promise<{ status: string; transcript_length: number }> {
-  return apiFetch(`/content/${id}/transcribe`, { method: "POST" });
+  return apiFetch(`/content/${id}/transcribe/`, { method: "POST" });
 }
 
 export function setConsumed(id: string, consumed: boolean): Promise<{ id: string; consumed: boolean }> {
-  return apiFetch(`/content/${id}/consumed?consumed=${consumed}`, { method: "PUT" });
+  return apiFetch(`/content/${id}/consumed/?consumed=${consumed}`, { method: "PUT" });
 }
 
 export function setInterest(id: string, interest: "up" | "down" | "none"): Promise<{ id: string; interest: string | null }> {
-  return apiFetch(`/content/${id}/interest?interest=${interest}`, { method: "PUT" });
+  return apiFetch(`/content/${id}/interest/?interest=${interest}`, { method: "PUT" });
 }
 
 export interface PlaybackProgress {
@@ -188,7 +188,7 @@ export interface PlaybackProgress {
 }
 
 export function batchPlaybackProgress(itemIds: string[]): Promise<Record<string, PlaybackProgress>> {
-  return apiFetch("/content/playback-progress", {
+  return apiFetch("/content/playback-progress/", {
     method: "POST",
     body: JSON.stringify(itemIds),
   });
@@ -197,14 +197,14 @@ export function batchPlaybackProgress(itemIds: string[]): Promise<Record<string,
 // --- Playback ---
 
 export function getPlayback(contentItemId: string): Promise<PlaybackState | null> {
-  return apiFetch(`/playback/${contentItemId}`);
+  return apiFetch(`/playback/${contentItemId}/`);
 }
 
 export function updatePlayback(
   contentItemId: string,
   positionSeconds: number,
 ): Promise<PlaybackState> {
-  return apiFetch(`/playback/${contentItemId}`, {
+  return apiFetch(`/playback/${contentItemId}/`, {
     method: "PUT",
     body: JSON.stringify({ position_seconds: positionSeconds }),
   });
@@ -213,5 +213,5 @@ export function updatePlayback(
 // --- Polling ---
 
 export function triggerPoll(): Promise<{ status: string; message?: string }> {
-  return apiFetch("/polling/trigger", { method: "POST" });
+  return apiFetch("/polling/trigger/", { method: "POST" });
 }

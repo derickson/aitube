@@ -22,14 +22,14 @@ export default function App() {
         <h1>AITube</h1>
         <nav>
           <NavLink to="/">Timeline</NavLink>
-          <NavLink to="/subscriptions">Subscriptions</NavLink>
+          <NavLink to="/subscriptions/">Subscriptions</NavLink>
         </nav>
         <ThemeToggle theme={theme} onToggle={handleToggle} />
       </header>
       <main>
         <Routes>
           <Route path="/" element={<Timeline />} />
-          <Route path="/subscriptions" element={<SubscriptionManager />} />
+          <Route path="/subscriptions/" element={<SubscriptionManager />} />
         </Routes>
       </main>
     </BrowserRouter>

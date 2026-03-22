@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/polling", tags=["polling"])
 
 
-@router.post("/trigger")
+@router.post("/trigger/")
 async def trigger_poll():
     """Poll all active subscriptions for new content."""
     results = await poll_all_active()
@@ -24,7 +24,7 @@ async def trigger_poll():
     }
 
 
-@router.post("/trigger/{sub_id}")
+@router.post("/trigger/{sub_id}/")
 async def trigger_poll_single(sub_id: str):
     """Poll a single subscription for new content."""
     es = get_es_client()

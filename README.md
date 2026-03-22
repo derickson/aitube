@@ -146,23 +146,26 @@ frontend/
 
 ## API Endpoints
 
+All API paths use trailing slashes. This is required for compatibility with reverse proxies that add trailing slashes via rewrite rules.
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
-| POST | `/api/subscriptions/resolve` | Auto-detect feed type and metadata from any URL |
-| POST | `/api/subscriptions` | Add a subscription |
-| GET | `/api/subscriptions` | List subscriptions (with content counts) |
-| GET | `/api/subscriptions/{id}` | Get subscription |
-| PATCH | `/api/subscriptions/{id}` | Update subscription |
-| DELETE | `/api/subscriptions/{id}` | Delete subscription |
-| GET | `/api/content` | Search content with facets (type, consumed, interest) |
-| GET | `/api/content/export/csv` | Export all content as CSV |
-| GET | `/api/content/{id}` | Get content item |
-| PUT | `/api/content/{id}/consumed` | Set consumed status |
-| PUT | `/api/content/{id}/interest` | Set interest (up/down/none) |
-| POST | `/api/content/playback-progress` | Batch get playback progress |
-| GET | `/api/playback/{id}` | Get playback position |
-| PUT | `/api/playback/{id}` | Update playback position |
-| POST | `/api/polling/trigger` | Trigger feed poll (all active subscriptions) |
-| POST | `/api/polling/trigger/{id}` | Trigger feed poll (single subscription) |
-| DELETE | `/api/content/{id}` | Delete content item |
+| GET | `/health/` | Health check |
+| POST | `/api/subscriptions/resolve/` | Auto-detect feed type and metadata from any URL |
+| POST | `/api/subscriptions/` | Add a subscription |
+| GET | `/api/subscriptions/` | List subscriptions (with content counts) |
+| GET | `/api/subscriptions/{id}/` | Get subscription |
+| PATCH | `/api/subscriptions/{id}/` | Update subscription |
+| DELETE | `/api/subscriptions/{id}/` | Delete subscription |
+| GET | `/api/content/` | Search content with facets (type, consumed, interest) |
+| GET | `/api/content/export/csv/` | Export all content as CSV |
+| GET | `/api/content/{id}/` | Get content item |
+| PUT | `/api/content/{id}/consumed/` | Set consumed status |
+| PUT | `/api/content/{id}/interest/` | Set interest (up/down/none) |
+| POST | `/api/content/{id}/transcribe/` | Trigger transcription for a content item |
+| POST | `/api/content/playback-progress/` | Batch get playback progress |
+| GET | `/api/playback/{id}/` | Get playback position |
+| PUT | `/api/playback/{id}/` | Update playback position |
+| POST | `/api/polling/trigger/` | Trigger feed poll (all active subscriptions) |
+| POST | `/api/polling/trigger/{id}/` | Trigger feed poll (single subscription) |
+| DELETE | `/api/content/{id}/` | Delete content item |

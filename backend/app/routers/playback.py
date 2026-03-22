@@ -12,7 +12,7 @@ from backend.app.services.elasticsearch import (
 router = APIRouter(prefix="/api/playback", tags=["playback"])
 
 
-@router.get("/{content_item_id}", response_model=PlaybackState | None)
+@router.get("/{content_item_id}/", response_model=PlaybackState | None)
 async def get_playback(content_item_id: str):
     es = get_es_client()
     resp = await es.search(
@@ -28,7 +28,7 @@ async def get_playback(content_item_id: str):
     return PlaybackState(**hits[0]["_source"])
 
 
-@router.put("/{content_item_id}", response_model=PlaybackState)
+@router.put("/{content_item_id}/", response_model=PlaybackState)
 async def update_playback(content_item_id: str, data: PlaybackUpdate):
     es = get_es_client()
 
