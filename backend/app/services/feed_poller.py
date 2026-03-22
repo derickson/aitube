@@ -2,6 +2,7 @@ import logging
 import re
 import uuid
 import warnings
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,6 +15,7 @@ from backend.app.models.subscription import Subscription, SubscriptionType
 from backend.app.services import content_dlp
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
+    PLAYBACK_STATE_INDEX,
     SUBSCRIPTIONS_INDEX,
     get_es_client,
 )
@@ -478,7 +480,6 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
 
         # If an ad was detected, set the playback position to skip past it
         if ad_skip_to is not None and ad_skip_to > 0:
-            from backend.app.services.elasticsearch import PLAYBACK_STATE_INDEX
             await es.index(
                 index=PLAYBACK_STATE_INDEX,
                 document={
@@ -503,6 +504,87 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
     return new_ids
 
 
+async def deduplicate_recent_items(days: int = 7) -> int:
+    """Find and remove duplicate content items from the last N days.
+
+    Groups items by URL; for each group with >1 item, keeps the one
+    with the most user interaction and deletes the rest.
+    Returns the number of items removed.
+    """
+    es = get_es_client()
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {
+                "range": {"discovered_at": {"gte": f"now-{days}d"}},
+            },
+            "_source": ["url", "title", "consumed", "user_interest", "discovered_at"],
+            "size": 5000,
+        },
+    )
+
+    hits = resp["hits"]["hits"]
+    if not hits:
+        return 0
+
+    # Group by URL
+    url_groups: dict[str, list[dict]] = defaultdict(list)
+    for hit in hits:
+        url = hit["_source"].get("url", "")
+        if url:
+            url_groups[url].append(hit)
+
+    # Find groups with duplicates
+    to_delete: list[str] = []
+    for url, group in url_groups.items():
+        if len(group) <= 1:
+            continue
+
+        # Score each item: consumed(+4), user_interest set(+2), earlier discovered_at as tiebreak
+        def score(hit: dict) -> tuple:
+            src = hit["_source"]
+            consumed = 1 if src.get("consumed") else 0
+            has_interest = 1 if src.get("user_interest") else 0
+            # Earlier discovered_at wins (negate for sort: earlier = larger negative = sorted first)
+            discovered = src.get("discovered_at", "9999")
+            return (consumed, has_interest, discovered)
+
+        # Sort: highest score first, earliest discovered_at as tiebreak (ascending discovered = keep oldest)
+        group.sort(key=lambda h: (-score(h)[0], -score(h)[1], score(h)[2]))
+        keeper = group[0]
+        duplicates = group[1:]
+
+        for dup in duplicates:
+            to_delete.append(dup["_id"])
+            logger.info(
+                "Dedup: removing '%s' (%s) — keeping %s",
+                dup["_source"].get("title", "?")[:60],
+                dup["_id"],
+                keeper["_id"],
+            )
+
+    if not to_delete:
+        return 0
+
+    # Delete duplicate content items and their playback states
+    for item_id in to_delete:
+        try:
+            await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)
+        except Exception as e:
+            logger.warning("Failed to delete content item %s: %s", item_id, e)
+        try:
+            # Delete playback state by content_item_id (uses delete_by_query)
+            await es.delete_by_query(
+                index=PLAYBACK_STATE_INDEX,
+                body={"query": {"term": {"content_item_id": item_id}}},
+            )
+        except Exception:
+            pass  # No playback state is fine
+
+    logger.info("Removed %d duplicate(s) in post-poll cleanup", len(to_delete))
+    return len(to_delete)
+
+
 async def poll_all_active() -> dict[str, list[str]]:
     """Poll all active subscriptions. Returns {subscription_id: [new_content_ids]}."""
     es = get_es_client()
@@ -514,11 +596,27 @@ async def poll_all_active() -> dict[str, list[str]]:
         },
     )
 
-    results: dict[str, list[str]] = {}
+    # Deduplicate subscriptions by URL to avoid polling same feed multiple times
+    seen_urls: dict[str, str] = {}
+    unique_subs: list[Subscription] = []
     for hit in resp["hits"]["hits"]:
         sub = Subscription(id=hit["_id"], **hit["_source"])
+        if sub.url in seen_urls:
+            logger.warning(
+                "Skipping duplicate subscription %s (%s) — same URL as %s",
+                sub.name, sub.id, seen_urls[sub.url],
+            )
+            continue
+        seen_urls[sub.url] = sub.id
+        unique_subs.append(sub)
+
+    results: dict[str, list[str]] = {}
+    for sub in unique_subs:
         new_ids = await poll_subscription(sub)
         if new_ids:
             results[sub.id] = new_ids
+
+    # Clean up any duplicate content items from recent polls
+    await deduplicate_recent_items()
 
     return results
