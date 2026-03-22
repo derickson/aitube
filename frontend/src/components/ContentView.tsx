@@ -34,11 +34,26 @@ function renderInlineMarkdown(text: string): string {
 
 interface Props {
   itemId: string;
+  subName?: string;
   onClose: () => void;
   onConsumedChange?: (itemId: string, consumed: boolean) => void;
 }
 
-export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
+function formatPublishDate(dateStr: string | null): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function ContentView({ itemId, subName, onClose, onConsumedChange }: Props) {
   const [item, setItem] = useState<ContentItem | null>(null);
   const [playback, setPlayback] = useState<PlaybackState | null>(null);
   const [consumed, setConsumed] = useState(false);
@@ -118,7 +133,14 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
     <aside className="flyout" ref={panelRef}>
       <div className="flyout-sticky">
         <div className="flyout-header">
-          <h2 className="flyout-title">{item.title}</h2>
+          <div>
+            <h2 className="flyout-title">{item.title}</h2>
+            <p className="flyout-meta">
+              {subName && <span className="flyout-meta-source">{subName}</span>}
+              {subName && item.published_at && <span className="flyout-meta-sep"> · </span>}
+              {item.published_at && <span>{formatPublishDate(item.published_at)}</span>}
+            </p>
+          </div>
           <div className="flyout-actions">
             <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
               Original

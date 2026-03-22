@@ -310,6 +310,7 @@ export function Timeline() {
         {selectedId && (
           <ContentView
             itemId={selectedId}
+            subName={subs[items.find(i => i.id === selectedId)?.subscription_id ?? ""]?.name ?? ""}
             onClose={() => setSelectedId(null)}
             onConsumedChange={handleConsumedChange}
           />
