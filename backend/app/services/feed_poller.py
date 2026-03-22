@@ -1,11 +1,14 @@
 import logging
 import re
 import uuid
+import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from backend.app.models.subscription import Subscription, SubscriptionType
 from backend.app.services import content_dlp
