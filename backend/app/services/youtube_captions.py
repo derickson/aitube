@@ -71,10 +71,10 @@ def _parse_caption_data(info: dict[str, Any], lang: str = "en") -> dict[str, Any
     }
 
 
-def fetch_captions(video_url: str, lang: str = "en") -> dict[str, Any] | None:
+def fetch_video_metadata(video_url: str, lang: str = "en") -> dict[str, Any] | None:
     """
-    Fetch auto-generated captions for a YouTube video.
-    Makes a single yt-dlp call to get info + captions.
+    Fetch video metadata and captions via yt-dlp.
+    Returns {"captions": {...} | None, "is_live": bool} or None on failure.
     """
     ydl_opts = {
         "skip_download": True,
@@ -91,4 +91,18 @@ def fetch_captions(video_url: str, lang: str = "en") -> dict[str, Any] | None:
         logger.warning("yt-dlp failed for %s: %s", video_url, e)
         return None
 
-    return _parse_caption_data(info, lang)
+    is_live = info.get("is_live") is True or info.get("was_live") is True
+    captions = _parse_caption_data(info, lang)
+
+    return {"captions": captions, "is_live": is_live}
+
+
+def fetch_captions(video_url: str, lang: str = "en") -> dict[str, Any] | None:
+    """
+    Fetch auto-generated captions for a YouTube video.
+    Makes a single yt-dlp call to get info + captions.
+    """
+    result = fetch_video_metadata(video_url, lang)
+    if result is None:
+        return None
+    return result["captions"]

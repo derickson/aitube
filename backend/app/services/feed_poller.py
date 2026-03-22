@@ -170,16 +170,23 @@ async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
 
     items = _filter_by_age(items, settings.youtube_max_age_days)
 
-    # Fetch captions for each video via yt-dlp (one call per video)
+    # Fetch metadata + captions for each video via yt-dlp (one call per video)
+    # Also filters out livestreams
     if items:
-        from backend.app.services.youtube_captions import fetch_captions
+        from backend.app.services.youtube_captions import fetch_video_metadata
+        non_live_items = []
         for item in items:
             try:
-                transcript = fetch_captions(item["url"])
-                if transcript:
-                    item["_transcript"] = transcript
+                meta = fetch_video_metadata(item["url"])
+                if meta and meta["is_live"]:
+                    logger.info("Skipping livestream: %s", item["title"])
+                    continue
+                if meta and meta["captions"]:
+                    item["_transcript"] = meta["captions"]
             except Exception as e:
-                logger.warning("Failed to fetch captions for %s: %s", item["url"], e)
+                logger.warning("Failed to fetch metadata for %s: %s", item["url"], e)
+            non_live_items.append(item)
+        items = non_live_items
 
     return items
 
