@@ -104,6 +104,7 @@ export function Timeline() {
         listSubscriptions(),
       ]);
       setData(contentData);
+      setConsumedIds(new Set(contentData.items.filter((i) => i.consumed).map((i) => i.id)));
       const subMap: Record<string, Subscription> = {};
       for (const s of subData) subMap[s.id] = s;
       setSubs(subMap);
