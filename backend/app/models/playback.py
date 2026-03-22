@@ -12,3 +12,4 @@ class PlaybackState(BaseModel):
 
 class PlaybackUpdate(BaseModel):
     position_seconds: float
+    duration_seconds: float | None = None

@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { ErrorBanner } from "./ErrorBanner";
+import { ContentTabs } from "./ContentTabs";
+import { ChatPanel } from "./ChatPanel";
 import {
   getContentItem,
   getPlayback,
@@ -43,6 +45,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
+  const [activeTab, setActiveTab] = useState("summary");
   const panelRef = useRef<HTMLDivElement>(null);
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
@@ -60,9 +63,10 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
       .finally(() => setLoading(false));
   }, [itemId]);
 
-  // Scroll panel into view when opened
+  // Scroll panel into view and reset tab when opened
   useEffect(() => {
     panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveTab("summary");
   }, [itemId]);
 
   if (loading) {
@@ -134,49 +138,76 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
       </div>
 
       <div className="flyout-scroll">
-        {item.summary && (
-          <div className="flyout-summary">
-            <h3 className="flyout-summary-heading">AI Summary</h3>
-            <div
-              className="flyout-summary-text"
-              dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(item.summary) }}
+        <ContentTabs
+          tabs={[
+            { id: "summary", label: "Summary" },
+            ...(hasTranscript ? [{ id: "transcript", label: "Transcript" }] : []),
+            { id: "chat", label: "Chat" },
+          ]}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        >
+          <div style={{ display: activeTab === "summary" ? "block" : "none" }}>
+            {item.summary && (
+              <div className="flyout-summary">
+                <h3 className="flyout-summary-heading">AI Summary</h3>
+                <div
+                  className="flyout-summary-text"
+                  dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(item.summary) }}
+                />
+              </div>
+            )}
+
+            {item.type === "article" && (
+              <ArticleReader item={item} onConsumed={() => {
+                setConsumed(true);
+                onConsumedChange?.(itemId, true);
+              }} />
+            )}
+
+            <div className="flyout-actions flyout-actions-bottom">
+              <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
+                Original
+              </a>
+              <button
+                className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
+                onClick={handleMarkViewed}
+              >
+                {consumed ? "Viewed" : "Mark Viewed"}
+              </button>
+              <button className="btn" onClick={onClose}>Close</button>
+            </div>
+          </div>
+
+          {hasTranscript && item.transcript && (
+            <div style={{ display: activeTab === "transcript" ? "block" : "none" }}>
+              <TranscriptViewer
+                transcript={item.transcript}
+                currentTime={currentTime}
+                onSeek={(time) => {
+                  if (item.type === "podcast_episode") {
+                    audioSeekRef.current?.(time);
+                  } else if (item.type === "video") {
+                    videoSeekRef.current?.(time);
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ display: activeTab === "chat" ? "flex" : "none" }} className="chat-tab-panel">
+            <ChatPanel
+              item={item}
+              onSeek={(time) => {
+                if (item.type === "podcast_episode") {
+                  audioSeekRef.current?.(time);
+                } else if (item.type === "video") {
+                  videoSeekRef.current?.(time);
+                }
+              }}
             />
           </div>
-        )}
-
-        {item.type === "article" && (
-          <ArticleReader item={item} onConsumed={() => {
-            setConsumed(true);
-            onConsumedChange?.(itemId, true);
-          }} />
-        )}
-
-        {hasTranscript && item.transcript && (
-          <TranscriptViewer
-            transcript={item.transcript}
-            currentTime={currentTime}
-            onSeek={(time) => {
-              if (item.type === "podcast_episode") {
-                audioSeekRef.current?.(time);
-              } else if (item.type === "video") {
-                videoSeekRef.current?.(time);
-              }
-            }}
-          />
-        )}
-
-        <div className="flyout-actions flyout-actions-bottom">
-          <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
-            Original
-          </a>
-          <button
-            className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
-            onClick={handleMarkViewed}
-          >
-            {consumed ? "Viewed" : "Mark Viewed"}
-          </button>
-          <button className="btn" onClick={onClose}>Close</button>
-        </div>
+        </ContentTabs>
       </div>
     </aside>
   );
@@ -278,7 +309,8 @@ function YouTubePlayer({
     const player = playerRef.current;
     if (!player || typeof player.getCurrentTime !== "function") return;
     const pos = player.getCurrentTime();
-    if (pos > 0) updatePlayback(item.id, pos).catch(() => {});
+    const dur = typeof player.getDuration === "function" ? player.getDuration() : undefined;
+    if (pos > 0) updatePlayback(item.id, pos, dur && dur > 0 ? dur : undefined).catch(() => {});
   }, [item.id]);
 
   const startTracking = useCallback(() => {
@@ -370,7 +402,8 @@ function AudioPlayer({
   const reportPosition = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || audio.paused) return;
-    if (audio.currentTime > 0) updatePlayback(item.id, audio.currentTime).catch(() => {});
+    const dur = audio.duration && isFinite(audio.duration) ? audio.duration : undefined;
+    if (audio.currentTime > 0) updatePlayback(item.id, audio.currentTime, dur).catch(() => {});
   }, [item.id]);
 
   const startTracking = useCallback(() => {

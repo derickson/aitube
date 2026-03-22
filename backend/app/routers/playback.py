@@ -41,6 +41,10 @@ async def update_playback(content_item_id: str, data: PlaybackUpdate):
     try:
         item_resp = await es.get(index=CONTENT_ITEMS_INDEX, id=content_item_id)
         duration = item_resp["_source"].get("duration_seconds")
+        # Backfill duration from player if missing
+        if not duration and data.duration_seconds and data.duration_seconds > 0:
+            duration = data.duration_seconds
+            await es.update(index=CONTENT_ITEMS_INDEX, id=content_item_id, doc={"duration_seconds": duration})
         if duration and duration > 0:
             consumed = position >= (duration * 0.9)
         # Update consumed flag on the content item itself

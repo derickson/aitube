@@ -203,11 +203,29 @@ export function getPlayback(contentItemId: string): Promise<PlaybackState | null
 export function updatePlayback(
   contentItemId: string,
   positionSeconds: number,
+  durationSeconds?: number,
 ): Promise<PlaybackState> {
+  const body: Record<string, number> = { position_seconds: positionSeconds };
+  if (durationSeconds !== undefined) body.duration_seconds = durationSeconds;
   return apiFetch(`/playback/${contentItemId}/`, {
     method: "PUT",
-    body: JSON.stringify({ position_seconds: positionSeconds }),
+    body: JSON.stringify(body),
   });
+}
+
+// --- Chat ---
+
+export interface Agent {
+  id: string;
+  name: string;
+}
+
+export function listAgents(): Promise<Agent[]> {
+  return apiFetch("/chat/agents/");
+}
+
+export function chatStreamUrl(itemId: string): string {
+  return `${BASE}/chat/${itemId}/stream/`;
 }
 
 // --- Polling ---

@@ -398,6 +398,8 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                 if meta and meta["is_live"]:
                     logger.info("Skipping livestream: %s", doc["title"])
                     continue
+                if meta and meta.get("duration"):
+                    doc["duration_seconds"] = meta["duration"]
                 if meta and meta["captions"]:
                     doc["transcript"] = meta["captions"]
             except Exception as e:
@@ -414,6 +416,14 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                         doc["transcript"] = t if isinstance(t, dict) else {"text": t, "chunks": []}
                 except Exception as e:
                     logger.warning("content-dlp transcription also failed for %s: %s", doc["url"], e)
+
+            # Fallback: derive duration from transcript chunks if still missing
+            if not doc.get("duration_seconds"):
+                t = doc.get("transcript")
+                if isinstance(t, dict) and t.get("chunks"):
+                    last_end = t["chunks"][-1].get("end", 0)
+                    if last_end > 0:
+                        doc["duration_seconds"] = last_end
 
         # For podcast episodes, download audio and transcribe
         ad_skip_to: float | None = None

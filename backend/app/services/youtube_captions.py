@@ -93,8 +93,9 @@ def fetch_video_metadata(video_url: str, lang: str = "en") -> dict[str, Any] | N
 
     is_live = info.get("is_live") is True or info.get("was_live") is True
     captions = _parse_caption_data(info, lang)
+    duration = info.get("duration")
 
-    return {"captions": captions, "is_live": is_live}
+    return {"captions": captions, "is_live": is_live, "duration": duration}
 
 
 def fetch_captions(video_url: str, lang: str = "en") -> dict[str, Any] | None:
