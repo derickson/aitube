@@ -26,10 +26,17 @@ function renderInlineMarkdown(text: string): string {
     .replace(/_(.+?)_/g, "<em>$1</em>")
     .replace(/`(.+?)`/g, "<code>$1</code>")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/g, '<span class="summary-timestamp-link" data-timestamp="$1">[$1]</span>')
     .replace(/\n\n+/g, "</p><p>")
     .replace(/\n/g, "<br>")
     .replace(/^/, "<p>")
     .replace(/$/, "</p>");
+}
+
+function parseTimestamp(ts: string): number {
+  const parts = ts.split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return parts[0] * 60 + parts[1];
 }
 
 interface Props {
@@ -193,6 +200,18 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
                 <div
                   className="flyout-summary-text"
                   dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(item.summary) }}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement;
+                    const ts = target.dataset?.timestamp;
+                    if (ts) {
+                      const seconds = parseTimestamp(ts);
+                      if (item.type === "podcast_episode") {
+                        audioSeekRef.current?.(seconds);
+                      } else if (item.type === "video") {
+                        videoSeekRef.current?.(seconds);
+                      }
+                    }
+                  }}
                 />
               </div>
             )}

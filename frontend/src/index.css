@@ -1084,6 +1084,19 @@ main:has(.flyout-open) {
   color: var(--accent);
 }
 
+.summary-timestamp-link {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.summary-timestamp-link:hover {
+  text-decoration-style: solid;
+}
+
 .flyout-actions-bottom {
   margin-top: 1.5rem;
   padding-top: 1rem;

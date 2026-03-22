@@ -1,6 +1,7 @@
 """Generate brief AI summaries of content using Claude."""
 
 import logging
+from typing import Any
 
 import anthropic
 
@@ -9,18 +10,44 @@ from backend.app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds into H:MM:SS or M:SS."""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def _build_timestamped_transcript(chunks: list[dict[str, Any]], max_chars: int = 4000) -> str:
+    """Build a transcript string with timestamps from chunks."""
+    lines = []
+    total = 0
+    for chunk in chunks:
+        ts = _format_timestamp(chunk.get("start", 0))
+        line = f"[{ts}] {chunk.get('text', '')}"
+        total += len(line) + 1
+        if total > max_chars:
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
 async def summarize_content(
     title: str,
     content_type: str,
     transcript_text: str,
     description: str = "",
     author: str = "",
+    transcript_chunks: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """
     Generate a brief summary that clarifies what the content is actually about,
     cutting through clickbait titles to surface the real topic, opinion, or thesis.
 
-    Returns a 2-3 sentence summary, or None if summarization fails.
+    Returns a summary with bullet-point breakdown (with timestamps for
+    video/podcast), or None if summarization fails.
     """
     if not settings.anthropic_api_key:
         return None
@@ -28,8 +55,13 @@ async def summarize_content(
     if not transcript_text and not description:
         return None
 
-    # Use first ~3000 chars of transcript to keep token usage reasonable
-    source_text = transcript_text[:3000] if transcript_text else description[:1000]
+    has_timestamps = bool(transcript_chunks)
+
+    # Build source text — prefer timestamped chunks for video/podcast
+    if has_timestamps and content_type in ("video", "podcast_episode"):
+        source_text = _build_timestamped_transcript(transcript_chunks)
+    else:
+        source_text = transcript_text[:4000] if transcript_text else description[:1000]
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
@@ -39,13 +71,26 @@ async def summarize_content(
         "article": "article",
     }.get(content_type, "content")
 
+    timestamp_instruction = ""
+    if has_timestamps and content_type in ("video", "podcast_episode"):
+        timestamp_instruction = """
+Include timestamps in [M:SS] or [H:MM:SS] format at the start of each bullet point, indicating where that topic begins. Use the timestamps from the transcript."""
+    elif content_type == "article":
+        timestamp_instruction = ""
+
     try:
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=200,
+            max_tokens=600,
             messages=[{
                 "role": "user",
-                "content": f"""Summarize this {type_label} in 2-3 sentences. Your goal is to clarify what it's actually about — cut through any clickbait or vague titling to tell the reader the real topic, the creator's opinion or thesis, and what they'll get from it. Be direct and specific.
+                "content": f"""Summarize this {type_label}. Your goal is to clarify what it's actually about — cut through any clickbait or vague titling to tell the reader the real topic, the creator's opinion or thesis, and what they'll get from it.
+
+First, write a 2-3 sentence summary that is direct and specific.
+
+Then, add a bulleted breakdown of the key topics or sections covered. Use 3-8 bullet points. Each bullet should be a concise phrase or sentence.{timestamp_instruction}
+
+Format the bullets as a markdown list (- item).
 
 Title: {title}
 {f"By: {author}" if author else ""}
@@ -57,6 +102,11 @@ Content:
         )
 
         summary = response.content[0].text.strip()
+        # Strip common unwanted heading prefixes the model sometimes adds
+        for prefix in ("## Summary\n", "## Summary\r\n", "**Summary:**\n", "**Summary**\n"):
+            if summary.startswith(prefix):
+                summary = summary[len(prefix):].lstrip()
+                break
         logger.info("Generated summary for: %s (%d chars)", title[:50], len(summary))
         return summary
 

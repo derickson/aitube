@@ -448,8 +448,11 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
         # Generate AI summary
         transcript_obj = doc.get("transcript")
         transcript_text = ""
+        transcript_chunks = None
         if isinstance(transcript_obj, dict):
             transcript_text = transcript_obj.get("text", "")
+            if transcript_obj.get("chunks"):
+                transcript_chunks = transcript_obj["chunks"]
         # For articles, use the markdown content instead of transcript
         source_text = transcript_text or doc.get("content_markdown", "")
         if source_text or doc.get("metadata", {}).get("description"):
@@ -461,6 +464,7 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                     transcript_text=source_text,
                     description=doc.get("metadata", {}).get("description", ""),
                     author=doc.get("metadata", {}).get("author", ""),
+                    transcript_chunks=transcript_chunks,
                 )
                 if summary:
                     doc["summary"] = summary
