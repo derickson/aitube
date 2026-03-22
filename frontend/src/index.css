@@ -70,6 +70,13 @@ body {
   background: var(--bg-secondary);
 }
 
+.app-logo {
+  height: 3rem;
+  cursor: pointer;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.25));
+}
+
 .app-header h1 {
   font-size: 1.5rem;
   font-weight: 700;
@@ -198,10 +205,24 @@ main:has(.flyout-open) {
 }
 
 .loading-text,
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3rem 1rem;
+}
+
+.empty-state-img {
+  width: 16rem;
+  image-rendering: pixelated;
+  margin-bottom: 1rem;
+}
+
 .empty-text {
   color: var(--text-secondary);
-  padding: 2rem 0;
+  padding: 0;
   text-align: center;
+  max-width: 28rem;
 }
 
 /* Subscriptions */

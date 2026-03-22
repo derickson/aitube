@@ -284,11 +284,20 @@ export function Timeline() {
           {loading && items.length === 0 ? (
             <p className="loading-text">Loading timeline...</p>
           ) : items.length === 0 ? (
-            <p className="empty-text">
-              {total === 0
-                ? "Nothing to watch right now. New content from your subscriptions is checked every 30 minutes, or you can add more subscriptions to expand your feed."
-                : "No items match your filters."}
-            </p>
+            <div className="empty-state">
+              {total === 0 && (
+                <img
+                  src="/aitube/images/sleeping.png"
+                  alt="Sleeping"
+                  className="empty-state-img"
+                />
+              )}
+              <p className="empty-text">
+                {total === 0
+                  ? "Nothing to watch right now. New content from your subscriptions is checked every 30 minutes, or you can add more subscriptions to expand your feed."
+                  : "No items match your filters."}
+              </p>
+            </div>
           ) : (
             <div className="content-grid">
               {items.map((item) => (

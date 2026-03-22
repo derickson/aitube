@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useNavigate } from "react-router-dom";
 
 import { Timeline } from "./components/Timeline";
 import { SubscriptionManager } from "./components/SubscriptionManager";
@@ -7,7 +7,8 @@ import { ThemeToggle } from "./theme/ThemeToggle";
 import { getInitialTheme, applyTheme } from "./theme/theme";
 import type { Theme } from "./theme/theme";
 
-export default function App() {
+function AppContent() {
+  const navigate = useNavigate();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
   useEffect(() => {
@@ -17,8 +18,14 @@ export default function App() {
   const handleToggle = useCallback((t: Theme) => setTheme(t), []);
 
   return (
-    <BrowserRouter basename="/aitube/">
+    <>
       <header className="app-header">
+        <img
+          src="/aitube/images/logo.png"
+          alt="AITube logo"
+          className="app-logo"
+          onClick={() => navigate("/")}
+        />
         <h1><span className="logo-ai">AI</span>Tube</h1>
         <nav>
           <NavLink to="/">Timeline</NavLink>
@@ -32,6 +39,14 @@ export default function App() {
           <Route path="/subscriptions/" element={<SubscriptionManager />} />
         </Routes>
       </main>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter basename="/aitube/">
+      <AppContent />
     </BrowserRouter>
   );
 }
