@@ -1272,3 +1272,95 @@ main:has(.flyout-open) {
 .reader-article em {
   font-style: italic;
 }
+
+/* Mobile-hidden elements (shown via media query) */
+.sidebar-toggle { display: none; }
+.sidebar-close { display: none; }
+
+/* ==============================
+   Mobile Responsive Overrides
+   ============================== */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0.75rem 1rem;
+    gap: 0.75rem;
+  }
+
+  .app-header h1 {
+    font-size: 1.2rem;
+  }
+
+  main {
+    padding: 0.75rem;
+  }
+
+  .sidebar-toggle {
+    display: inline-flex;
+  }
+
+  .sidebar-close {
+    display: block;
+    align-self: flex-end;
+  }
+
+  .facet-sidebar {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    width: 100%;
+    height: 100%;
+    background: var(--bg);
+    overflow-y: auto;
+    padding: 1rem;
+  }
+
+  .facet-sidebar.sidebar-open {
+    display: flex;
+  }
+
+  .timeline-layout {
+    display: block;
+  }
+
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-layout.flyout-open .content-grid {
+    display: none;
+  }
+
+  .flyout {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    min-width: unset;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 200;
+    margin: 0;
+    border-left: none;
+  }
+
+  .flyout-sticky {
+    padding: 0.75rem;
+  }
+
+  .flyout-scroll {
+    padding: 0.75rem;
+  }
+
+  .flyout-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .form-row {
+    flex-direction: column;
+  }
+
+  .form-row select {
+    width: 100%;
+  }
+}

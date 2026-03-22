@@ -56,6 +56,8 @@ export function Timeline() {
   // Selected content for inline player
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [consumedIds, setConsumedIds] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   const fetchDataRef = useRef<() => void>(undefined);
 
@@ -127,6 +129,15 @@ export function Timeline() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (selectedId && window.innerWidth <= 768) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [selectedId]);
+
   const handleInterestChange = useCallback(async (itemId: string, value: "up" | "down" | "none") => {
     await apiSetInterest(itemId, value).catch(() => {});
     setTimeout(() => fetchDataRef.current?.(), 500);
@@ -156,7 +167,10 @@ export function Timeline() {
   return (
     <div className="timeline">
       <div className="timeline-header">
-        <h2>Timeline</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <button className="btn sidebar-toggle" onClick={() => setSidebarOpen((s) => !s)}>Filters</button>
+          <h2>Timeline</h2>
+        </div>
         <span className="timeline-count">
           {items.length} of {total} items
         </span>
@@ -165,7 +179,8 @@ export function Timeline() {
       {error && <ErrorBanner error={error} />}
 
       <div className={`timeline-layout${selectedId ? " flyout-open" : ""}`}>
-        <aside className="facet-sidebar">
+        <aside className={`facet-sidebar${sidebarOpen ? " sidebar-open" : ""}`}>
+          <button className="btn sidebar-close" onClick={closeSidebar}>Close</button>
           <input
             type="text"
             className="facet-search"
@@ -178,7 +193,7 @@ export function Timeline() {
             <h4 className="facet-heading">Type</h4>
             <button
               className={`facet-item${!typeFilter ? " active" : ""}`}
-              onClick={() => setTypeFilter("")}
+              onClick={() => { setTypeFilter(""); closeSidebar(); }}
             >
               <span>All</span><span className="facet-count">{total}</span>
             </button>
@@ -186,7 +201,7 @@ export function Timeline() {
               <button
                 key={t}
                 className={`facet-item facet-type-${t === "video" ? "youtube_channel" : t === "podcast_episode" ? "podcast" : "rss"}${typeFilter === t ? " active" : ""}`}
-                onClick={() => setTypeFilter(typeFilter === t ? "" : t)}
+                onClick={() => { setTypeFilter(typeFilter === t ? "" : t); closeSidebar(); }}
               >
                 <span>{TYPE_LABELS[t]}</span><span className="facet-count">{facetCount(typeBuckets, t)}</span>
               </button>
@@ -197,7 +212,7 @@ export function Timeline() {
             <h4 className="facet-heading">Status</h4>
             <button
               className={`facet-item${!consumedFilter ? " active" : ""}`}
-              onClick={() => setConsumedFilter("")}
+              onClick={() => { setConsumedFilter(""); closeSidebar(); }}
             >
               <span>All</span>
             </button>
@@ -208,6 +223,7 @@ export function Timeline() {
                 onClick={() => {
                   const val = b.key === "watched" ? "true" : "false";
                   setConsumedFilter(consumedFilter === val ? "" : val);
+                  closeSidebar();
                 }}
               >
                 <span>{b.key === "watched" ? "Watched" : "Unwatched"}</span>
@@ -220,19 +236,19 @@ export function Timeline() {
             <h4 className="facet-heading">Interest</h4>
             <button
               className={`facet-item${!interestFilter ? " active" : ""}`}
-              onClick={() => setInterestFilter("")}
+              onClick={() => { setInterestFilter(""); closeSidebar(); }}
             >
               <span>All</span>
             </button>
             <button
               className={`facet-item facet-interest-up${interestFilter === "up" ? " active" : ""}`}
-              onClick={() => setInterestFilter(interestFilter === "up" ? "" : "up")}
+              onClick={() => { setInterestFilter(interestFilter === "up" ? "" : "up"); closeSidebar(); }}
             >
               <span>Interesting</span><span className="facet-count">{facetCount(interestBuckets, "up")}</span>
             </button>
             <button
               className={`facet-item facet-interest-down${interestFilter === "down" ? " active" : ""}`}
-              onClick={() => setInterestFilter(interestFilter === "down" ? "" : "down")}
+              onClick={() => { setInterestFilter(interestFilter === "down" ? "" : "down"); closeSidebar(); }}
             >
               <span>Not interested</span><span className="facet-count">{facetCount(interestBuckets, "down")}</span>
             </button>
@@ -242,7 +258,7 @@ export function Timeline() {
             <h4 className="facet-heading">Source</h4>
             <button
               className={`facet-item${!subFilter ? " active" : ""}`}
-              onClick={() => setSubFilter("")}
+              onClick={() => { setSubFilter(""); closeSidebar(); }}
             >
               <span>All</span>
             </button>
@@ -253,7 +269,7 @@ export function Timeline() {
                 <button
                   key={b.key}
                   className={`facet-item${subFilter === b.key ? " active" : ""}`}
-                  onClick={() => setSubFilter(subFilter === b.key ? "" : b.key)}
+                  onClick={() => { setSubFilter(subFilter === b.key ? "" : b.key); closeSidebar(); }}
                   title={name}
                 >
                   <span>{label}</span><span className="facet-count">{b.count}</span>
