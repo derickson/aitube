@@ -883,7 +883,7 @@ main:has(.flyout-open) {
   flex-shrink: 0;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100vh; /* fallback; JS adjusts to actual available height */
   display: flex;
   flex-direction: column;
   background: var(--card-bg);
@@ -1043,6 +1043,11 @@ main:has(.flyout-open) {
 .chat-tab-panel {
   flex-direction: column;
   flex: 1;
+  overflow: hidden;
+}
+
+.flyout-scroll.chat-active {
+  overflow: hidden;
 }
 
 .chat-panel {

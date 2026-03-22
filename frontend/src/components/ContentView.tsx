@@ -50,6 +50,23 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
 
+  // Keep flyout height matched to visible viewport
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const update = () => {
+      const rect = el.getBoundingClientRect();
+      el.style.height = `${window.innerHeight - rect.top}px`;
+    };
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [itemId, loading]);
+
   useEffect(() => {
     setLoading(true);
     Promise.all([getContentItem(itemId), getPlayback(itemId)])
@@ -137,7 +154,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
         )}
       </div>
 
-      <div className="flyout-scroll">
+      <div className={`flyout-scroll${activeTab === "chat" ? " chat-active" : ""}`}>
         <ContentTabs
           tabs={[
             { id: "summary", label: "Summary" },
