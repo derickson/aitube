@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { BrowserRouter, Routes, Route, NavLink, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 
 import { Timeline } from "./components/Timeline";
 import { SubscriptionManager } from "./components/SubscriptionManager";
@@ -8,7 +8,6 @@ import { getInitialTheme, applyTheme } from "./theme/theme";
 import type { Theme } from "./theme/theme";
 
 function AppContent() {
-  const navigate = useNavigate();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
 
   useEffect(() => {
@@ -24,7 +23,7 @@ function AppContent() {
           src="/aitube/images/logo.png"
           alt="AITube logo"
           className="app-logo"
-          onClick={() => navigate("/")}
+          onClick={() => window.location.href = "/aitube/"}
         />
         <h1><span className="logo-ai">AI</span>Tube</h1>
         <nav>
