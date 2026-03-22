@@ -243,15 +243,29 @@ def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
     desc_tag = item.find("description") or item.find("summary") or item.find("content")
     description = desc_tag.get_text(strip=True) if desc_tag else ""
 
-    # Look for images
+    # Extract inline <img src="..."> from description text (HTML-escaped in RSS becomes literal text)
+    desc_img = ""
+    img_match = re.search(r'<img[^>]+src=["\']?(https?://[^\s"\'>\)]+)', description)
+    if img_match:
+        desc_img = img_match.group(1)
+        # Clean the img tag text out of the plain-text description
+        description = re.sub(r'<img[^>]*>', '', description).strip()
+
+    # Look for images — try media:thumbnail, media:content, enclosure, then description img
     thumbnail = ""
     media_thumb = item.find("media:thumbnail") or item.find("thumbnail")
     if media_thumb:
         thumbnail = media_thumb.get("url", "")
     if not thumbnail:
+        media_content = item.find("media:content") or item.find("content", attrs={"medium": "image"})
+        if media_content and media_content.get("url"):
+            thumbnail = media_content.get("url", "")
+    if not thumbnail:
         enclosure = item.find("enclosure")
         if enclosure and "image" in (enclosure.get("type") or ""):
             thumbnail = enclosure.get("url", "")
+    if not thumbnail and desc_img:
+        thumbnail = desc_img
 
     return {
         "content_id": external_id,

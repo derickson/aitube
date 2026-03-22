@@ -475,11 +475,13 @@ function TranscriptViewer({
     return currentTime >= chunk.start && (!next || currentTime < next.start);
   }) ?? -1;
 
-  // Auto-scroll to active chunk
+  // Auto-scroll to active chunk, or to top if playback hasn't reached first chunk
   useEffect(() => {
     if (activeIndex >= 0 && activeIndex !== lastScrolledIndex.current && activeRef.current) {
       lastScrolledIndex.current = activeIndex;
       activeRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (activeIndex === -1 && lastScrolledIndex.current === -1 && containerRef.current) {
+      containerRef.current.scrollTop = 0;
     }
   }, [activeIndex]);
 
