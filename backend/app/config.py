@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Polling
     youtube_max_age_days: int = 5
     podcast_max_age_days: int = 5
-    rss_max_age_days: int = 14
+    rss_max_age_days: int = 90
 
 
 settings = Settings()
