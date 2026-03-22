@@ -135,10 +135,10 @@ def _parse_feed_metadata(body: str) -> dict:
     if channel:
         title_tag = channel.find("title", recursive=False)
         if title_tag:
-            meta["name"] = title_tag.get_text(strip=True)
+            meta["name"] = _strip_cdata(title_tag.get_text(strip=True))
         desc_tag = channel.find("description", recursive=False)
         if desc_tag:
-            meta["description"] = desc_tag.get_text(strip=True)
+            meta["description"] = _strip_cdata(desc_tag.get_text(strip=True))
         img = channel.find("image")
         if img:
             img_url = img.find("url")
@@ -154,10 +154,10 @@ def _parse_feed_metadata(body: str) -> dict:
     if feed_tag and "name" not in meta:
         title_tag = feed_tag.find("title", recursive=False)
         if title_tag:
-            meta["name"] = title_tag.get_text(strip=True)
+            meta["name"] = _strip_cdata(title_tag.get_text(strip=True))
         sub_tag = feed_tag.find("subtitle", recursive=False)
         if sub_tag:
-            meta["description"] = sub_tag.get_text(strip=True)
+            meta["description"] = _strip_cdata(sub_tag.get_text(strip=True))
 
     return meta
 
