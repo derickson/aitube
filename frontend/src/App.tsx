@@ -19,7 +19,7 @@ export default function App() {
   return (
     <BrowserRouter basename="/aitube/">
       <header className="app-header">
-        <h1>AITube</h1>
+        <h1><span className="logo-ai">AI</span>Tube</h1>
         <nav>
           <NavLink to="/">Timeline</NavLink>
           <NavLink to="/subscriptions/">Subscriptions</NavLink>

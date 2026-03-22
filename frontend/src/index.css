@@ -20,6 +20,7 @@
   --rss: #f57c00;
   --rss-light: #fff3e0;
   --rss-border: #ffcc80;
+  --logo-ai: #e88c30;
 }
 
 [data-theme="dark"] {
@@ -44,6 +45,7 @@
   --rss: #ffa726;
   --rss-light: #2a1f0f;
   --rss-border: #6e4b1e;
+  --logo-ai: #f5a623;
 }
 
 * {
@@ -72,6 +74,11 @@ body {
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--accent);
+}
+
+.app-header h1 .logo-ai {
+  color: var(--logo-ai);
+  font-weight: 800;
 }
 
 .app-header nav {
@@ -656,6 +663,13 @@ main:has(.flyout-open) {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.facet-group:first-of-type {
+  border-top: none;
+  padding-top: 0;
 }
 
 .facet-heading {
@@ -665,7 +679,7 @@ main:has(.flyout-open) {
   letter-spacing: 0.05em;
   color: var(--text-secondary);
   padding: 0 0.5rem;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.25rem;
 }
 
 .facet-item {

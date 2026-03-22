@@ -515,6 +515,28 @@ function TranscriptViewer({
   );
 }
 
+function upgradeImageUrl(url: string): string {
+  if (url.includes("storage.googleapis.com/")) {
+    return url.replace(/\.width-\d+\./, ".width-800.");
+  }
+  return url;
+}
+
+function ReaderImage({ src, alt }: { src: string; alt: string }) {
+  const upgraded = upgradeImageUrl(src);
+  const needsFallback = upgraded !== src;
+  return (
+    <img
+      src={upgraded}
+      alt={alt}
+      className="reader-img"
+      {...(needsFallback && {
+        onError: (e) => { (e.target as HTMLImageElement).src = src; },
+      })}
+    />
+  );
+}
+
 function ArticleReader({ item, onConsumed }: { item: ContentItem; onConsumed?: () => void }) {
   const onConsumedRef = useRef(onConsumed);
   onConsumedRef.current = onConsumed;
@@ -540,7 +562,7 @@ function ArticleReader({ item, onConsumed }: { item: ContentItem; onConsumed?: (
       if (trimmed.startsWith("### ")) return <h4 key={i}>{trimmed.slice(4)}</h4>;
       if (trimmed.startsWith("![")) {
         const imgMatch = trimmed.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-        if (imgMatch) return <img key={i} src={imgMatch[2]} alt={imgMatch[1]} className="reader-img" />;
+        if (imgMatch) return <ReaderImage key={i} src={imgMatch[2]} alt={imgMatch[1]} />;
       }
       return <p key={i} dangerouslySetInnerHTML={{ __html: inlineMarkdown(trimmed) }} />;
     });
