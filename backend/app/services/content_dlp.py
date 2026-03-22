@@ -44,7 +44,7 @@ async def fetch_podcast(
 ) -> dict[str, Any]:
     """Fetch recent podcast episodes from an RSS feed."""
     return await _post("podcast", {
-        "feed_url": feed_url,
+        "url": feed_url,
         "episodes": episodes,
         "no_audio": no_audio,
         "transcript": transcript,

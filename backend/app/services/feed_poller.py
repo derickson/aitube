@@ -427,11 +427,11 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                     t = transcript_data["transcript"]
                     doc["transcript"] = t if isinstance(t, dict) else {"text": t, "chunks": []}
 
-                    # Detect ads at the start and find where content begins
-                    transcript_obj = doc["transcript"]
-                    if isinstance(transcript_obj, dict) and transcript_obj.get("chunks"):
-                        from backend.app.services.ad_detector import detect_ad_end
-                        ad_skip_to = await detect_ad_end(transcript_obj["chunks"])
+                    # Ad detection disabled — not working well enough yet
+                    # transcript_obj = doc["transcript"]
+                    # if isinstance(transcript_obj, dict) and transcript_obj.get("chunks"):
+                    #     from backend.app.services.ad_detector import detect_ad_end
+                    #     ad_skip_to = await detect_ad_end(transcript_obj["chunks"])
             except Exception as e:
                 logger.warning("Failed to transcribe podcast %s: %s", doc["title"], e)
 
