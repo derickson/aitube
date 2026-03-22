@@ -29,11 +29,11 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
 
 - **API routers** (`backend/app/routers/`): REST endpoints with trailing slashes (required for reverse proxy). Content search returns faceted aggregations from Elasticsearch.
 - **Services** (`backend/app/services/`): Core processing pipeline:
-  - `feed_poller.py` — Polls subscriptions, orchestrates the full pipeline: fetch feed → parse entries → dedup → scrape/transcribe → cleanup → summarize → index
+  - `feed_poller.py` — Polls subscriptions, orchestrates the full pipeline: fetch feed → parse entries → dedup → scrape/transcribe → cleanup → summarize → index → deduplicate content → backfill missing transcripts
   - `content_cleanup.py` — Two-stage article cleanup: deterministic pre-clean (regex patterns) then head+tail LLM cleanup via Claude Haiku
   - `content_dlp.py` — HTTP client to content-dlp service on host (port 7055), not subprocess calls
   - `youtube_captions.py` — yt-dlp for captions + livestream detection (via `is_live`/`was_live`)
-  - `summarizer.py` — Claude Sonnet for content summaries
+  - `summarizer.py` — Claude Sonnet for content summaries with bullet-point breakdowns and timestamps
   - `elasticsearch.py` — Async ES client with index mappings and lifecycle
 - **Config** (`backend/app/config.py`): Pydantic Settings reading from `.env`. Key: `content_dlp_url` defaults to localhost:7055, overridden to `host.docker.internal:7055` in Docker via `docker-compose.yml` environment block.
 
@@ -50,7 +50,8 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 1. Cron runs `poll_feeds.py` every 30 minutes
 2. For each subscription: fetch feed XML → parse entries → filter by age → dedup against ES
 3. Per new item: scrape content (RSS) or fetch captions (YouTube) → cleanup markdown → generate AI summary → index to ES
-4. Frontend fetches from content search API with server-side filtering and faceted aggregations
+4. Post-poll: deduplicate content items by URL, backfill missing transcripts (up to 5/cycle)
+5. Frontend fetches from content search API with server-side filtering and faceted aggregations
 
 ### Key Design Decisions
 

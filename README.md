@@ -9,7 +9,7 @@ Personal feed reader for YouTube, podcasts, and RSS with AI-powered curation. On
 - **Backend:** Python 3.12 / FastAPI
 - **Frontend:** React 19 / Vite / TypeScript
 - **Data:** Elasticsearch
-- **Ingestion:** content-dlp HTTP service + yt-dlp for YouTube captions
+- **Ingestion:** [content-dlp](https://github.com/derickson/content-dlp) HTTP service + yt-dlp for YouTube captions
 - **AI:** Claude Sonnet for summaries, ad detection, interest scoring, and content chat
 
 ## Setup
@@ -104,18 +104,19 @@ Paste any URL into the subscription manager — the system auto-detects the type
 
 - **YouTube:** channel URLs (`youtube.com/@handle`) or video URLs
 - **Podcasts:** direct RSS feeds, Apple Podcasts links, or Spotify links
-- **RSS/Atom:** direct feed URLs or any website (auto-discovers `<link rel="alternate">` feeds)
+- **RSS/Atom:** direct feed URLs or any website (auto-discovers `<link rel="alternate">` feeds, probes common feed paths relative to the URL and domain root)
 
-The resolver fetches the feed name, thumbnail, description, and sample items for preview before subscribing. YouTube Shorts are automatically filtered out.
+The resolver fetches the feed name, thumbnail, description, and sample items for preview before subscribing. A warning is shown if no feed is discovered. YouTube Shorts are automatically filtered out.
 
 ## Content Pipeline
 
 When new content is discovered during polling:
 
-1. **YouTube videos:** captions fetched via yt-dlp (instant, no download). Falls back to content-dlp transcription if captions unavailable.
+1. **YouTube videos:** captions fetched via yt-dlp (instant, no download). Falls back to content-dlp transcription if captions unavailable. Videos that fail transcript fetch (e.g., rate limits) are automatically retried on subsequent poll cycles.
 2. **Podcast episodes:** audio downloaded and transcribed locally via content-dlp. Claude detects ads in the first 90 seconds and sets the playback position to skip past them.
 3. **RSS articles:** full page scraped to markdown via content-dlp webscrape.
-4. **All types:** Claude generates a 2-3 sentence summary that cuts through clickbait to explain the actual topic, opinion, or thesis.
+4. **All types:** Claude generates a summary with a bullet-point breakdown of key topics. Videos and podcasts include clickable timestamps that seek the player. Duplicate content items are automatically detected and removed after each poll cycle.
+
 
 ## Features
 
@@ -125,7 +126,7 @@ When new content is discovered during polling:
 - **Timestamped transcripts** with live playback highlighting and click-to-seek
 - **Playback tracking** with resume from last position and 90% auto-complete
 - **Interest voting** (up/down) per content item to mark what's interesting
-- **AI summaries** that explain what content is actually about
+- **AI summaries** with bullet-point breakdowns and clickable timestamp links for video/podcast seek
 - **Ad skip** for podcasts — Claude detects sponsor reads and sets playback past them
 - **Smart URL resolution** for YouTube channels, Apple Podcasts, Spotify, and RSS discovery
 - **Light/dark theme** toggle
