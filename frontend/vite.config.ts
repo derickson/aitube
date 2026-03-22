@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: "0.0.0.0",
-    allowedHosts: ["smaug"],
+    allowedHosts: true,
     port: 8103,
     proxy: {
       "/aitube/api": {

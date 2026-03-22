@@ -134,7 +134,7 @@ export function ContentView({ itemId, onClose, onConsumedChange }: Props) {
       <div className="flyout-scroll">
         {item.summary && (
           <div className="flyout-summary">
-            <h3 className="flyout-summary-heading">Summary</h3>
+            <h3 className="flyout-summary-heading">AI Summary</h3>
             <div
               className="flyout-summary-text"
               dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(item.summary) }}

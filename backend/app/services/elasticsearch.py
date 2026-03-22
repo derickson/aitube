@@ -58,6 +58,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "interest_reasoning": {"type": "text"},
                 "transcript": {"type": "object", "enabled": False},
                 "consumed": {"type": "boolean"},
+                "user_interest": {"type": "keyword"},
                 "content_markdown": {"type": "text"},
                 "content_dlp_cache_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": False},
@@ -82,3 +83,12 @@ async def ensure_indices() -> None:
     for index_name, body in INDEX_MAPPINGS.items():
         if not await es.indices.exists(index=index_name):
             await es.indices.create(index=index_name, body=body)
+        else:
+            # Update mappings for any new fields on existing indices
+            try:
+                await es.indices.put_mapping(
+                    index=index_name,
+                    body=body["mappings"],
+                )
+            except Exception:
+                pass  # Ignore conflicts with existing field types

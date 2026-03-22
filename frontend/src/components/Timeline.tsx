@@ -2,11 +2,14 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import {
   searchContent,
   listSubscriptions,
+  batchPlaybackProgress,
+  setInterest as apiSetInterest,
   type ContentItem,
   type ContentType,
   type ContentSearchResponse,
   type FacetBucket,
   type Subscription,
+  type PlaybackProgress,
 } from "../api/client";
 import { ContentView } from "./ContentView";
 import { ErrorBanner } from "./ErrorBanner";
@@ -66,9 +69,13 @@ export function Timeline() {
     setTimeout(() => fetchDataRef.current?.(), 500);
   }, []);
 
+  // Playback progress (lazy loaded)
+  const [progress, setProgress] = useState<Record<string, PlaybackProgress>>({});
+
   // Server-side filters
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
+  const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">("");
   const subFilter = "";
   const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
 
@@ -85,6 +92,7 @@ export function Timeline() {
           content_type: (typeFilter || undefined) as ContentType | undefined,
           subscription_id: subFilter || undefined,
           consumed: (consumedFilter || undefined) as "true" | "false" | undefined,
+          interest: (interestFilter || undefined) as "up" | "down" | "none" | undefined,
           size: 200,
         }),
         listSubscriptions(),
@@ -94,18 +102,31 @@ export function Timeline() {
       for (const s of subData) subMap[s.id] = s;
       setSubs(subMap);
       setError("");
+
+      // Lazy load playback progress
+      const ids = contentData.items
+        .filter((i) => i.type === "video" || i.type === "podcast_episode")
+        .map((i) => i.id);
+      if (ids.length > 0) {
+        batchPlaybackProgress(ids).then(setProgress).catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load content");
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, typeFilter, subFilter, consumedFilter]);
+  }, [debouncedSearch, typeFilter, subFilter, consumedFilter, interestFilter]);
 
   fetchDataRef.current = fetchData;
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleInterestChange = useCallback(async (itemId: string, value: "up" | "down" | "none") => {
+    await apiSetInterest(itemId, value).catch(() => {});
+    setTimeout(() => fetchDataRef.current?.(), 500);
+  }, []);
 
   const handleSearchChange = (value: string) => {
     setSearch(value);
@@ -121,6 +142,7 @@ export function Timeline() {
 
   const typeBuckets = facets.type ?? [];
   const consumedBuckets = facets.consumed ?? [];
+  const interestBuckets = facets.interest ?? [];
 
   return (
     <div className="timeline">
@@ -133,59 +155,81 @@ export function Timeline() {
 
       {error && <ErrorBanner error={error} />}
 
-      <div className="timeline-filters">
-        <input
-          type="text"
-          className="timeline-search"
-          placeholder="Search content..."
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-        />
-
-        <div className="filter-pills">
-          <button
-            className={`filter-pill${!typeFilter ? " active" : ""}`}
-            onClick={() => setTypeFilter("")}
-          >
-            All <span className="filter-count">{total}</span>
-          </button>
-          {(["video", "podcast_episode", "article"] as ContentType[]).map((t) => (
-            <button
-              key={t}
-              className={`filter-pill filter-pill-type-${t === "video" ? "youtube_channel" : t === "podcast_episode" ? "podcast" : "rss"}${typeFilter === t ? " active" : ""}`}
-              onClick={() => setTypeFilter(typeFilter === t ? "" : t)}
-            >
-              {TYPE_LABELS[t]}
-              <span className="filter-count">{facetCount(typeBuckets, t)}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="filter-pills">
-          <button
-            className={`filter-pill${!consumedFilter ? " active" : ""}`}
-            onClick={() => setConsumedFilter("")}
-          >
-            All
-          </button>
-          {consumedBuckets.map((b) => (
-            <button
-              key={b.key}
-              className={`filter-pill${consumedFilter === (b.key === "watched" ? "true" : "false") ? " active" : ""}`}
-              onClick={() => {
-                const val = b.key === "watched" ? "true" : "false";
-                setConsumedFilter(consumedFilter === val ? "" : val);
-              }}
-            >
-              {b.key === "watched" ? "Watched" : "Unwatched"}
-              <span className="filter-count">{b.count}</span>
-            </button>
-          ))}
-        </div>
-
-      </div>
-
       <div className={`timeline-layout${selectedId ? " flyout-open" : ""}`}>
+        <aside className="facet-sidebar">
+          <input
+            type="text"
+            className="facet-search"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+          />
+
+          <div className="facet-group">
+            <h4 className="facet-heading">Type</h4>
+            <button
+              className={`facet-item${!typeFilter ? " active" : ""}`}
+              onClick={() => setTypeFilter("")}
+            >
+              <span>All</span><span className="facet-count">{total}</span>
+            </button>
+            {(["video", "podcast_episode", "article"] as ContentType[]).map((t) => (
+              <button
+                key={t}
+                className={`facet-item facet-type-${t === "video" ? "youtube_channel" : t === "podcast_episode" ? "podcast" : "rss"}${typeFilter === t ? " active" : ""}`}
+                onClick={() => setTypeFilter(typeFilter === t ? "" : t)}
+              >
+                <span>{TYPE_LABELS[t]}</span><span className="facet-count">{facetCount(typeBuckets, t)}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="facet-group">
+            <h4 className="facet-heading">Status</h4>
+            <button
+              className={`facet-item${!consumedFilter ? " active" : ""}`}
+              onClick={() => setConsumedFilter("")}
+            >
+              <span>All</span>
+            </button>
+            {consumedBuckets.map((b) => (
+              <button
+                key={b.key}
+                className={`facet-item${consumedFilter === (b.key === "watched" ? "true" : "false") ? " active" : ""}`}
+                onClick={() => {
+                  const val = b.key === "watched" ? "true" : "false";
+                  setConsumedFilter(consumedFilter === val ? "" : val);
+                }}
+              >
+                <span>{b.key === "watched" ? "Watched" : "Unwatched"}</span>
+                <span className="facet-count">{b.count}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="facet-group">
+            <h4 className="facet-heading">Interest</h4>
+            <button
+              className={`facet-item${!interestFilter ? " active" : ""}`}
+              onClick={() => setInterestFilter("")}
+            >
+              <span>All</span>
+            </button>
+            <button
+              className={`facet-item facet-interest-up${interestFilter === "up" ? " active" : ""}`}
+              onClick={() => setInterestFilter(interestFilter === "up" ? "" : "up")}
+            >
+              <span>Interesting</span><span className="facet-count">{facetCount(interestBuckets, "up")}</span>
+            </button>
+            <button
+              className={`facet-item facet-interest-down${interestFilter === "down" ? " active" : ""}`}
+              onClick={() => setInterestFilter(interestFilter === "down" ? "" : "down")}
+            >
+              <span>Not interested</span><span className="facet-count">{facetCount(interestBuckets, "down")}</span>
+            </button>
+          </div>
+        </aside>
+
         <div className="timeline-main">
           {loading && items.length === 0 ? (
             <p className="loading-text">Loading timeline...</p>
@@ -204,7 +248,9 @@ export function Timeline() {
                   subName={subs[item.subscription_id]?.name ?? ""}
                   isActive={item.id === selectedId}
                   isConsumed={consumedIds.has(item.id)}
+                  progress={progress[item.id]}
                   onSelect={() => setSelectedId(item.id === selectedId ? null : item.id)}
+                  onInterest={handleInterestChange}
                 />
               ))}
             </div>
@@ -228,13 +274,17 @@ function ContentCard({
   subName,
   isActive,
   isConsumed,
+  progress,
   onSelect,
+  onInterest,
 }: {
   item: ContentItem;
   subName: string;
   isActive: boolean;
   isConsumed: boolean;
+  progress?: PlaybackProgress;
   onSelect: () => void;
+  onInterest: (itemId: string, value: "up" | "down" | "none") => void;
 }) {
   const description =
     item.summary ||
@@ -246,7 +296,13 @@ function ContentCard({
     `content-card-type-${item.type}`,
     isActive && "content-card-active",
     isConsumed && "content-card-consumed",
+    item.user_interest === "down" && "content-card-downvoted",
   ].filter(Boolean).join(" ");
+
+  const handleInterestClick = (e: React.MouseEvent, value: "up" | "down") => {
+    e.stopPropagation();
+    onInterest(item.id, item.user_interest === value ? "none" : value);
+  };
 
   return (
     <div
@@ -272,6 +328,9 @@ function ContentCard({
               {formatDuration(item.duration_seconds)}
             </span>
           )}
+          {progress && progress.percent > 0 && progress.percent < 100 && (
+            <span className="content-progress">{progress.percent}%</span>
+          )}
         </div>
       )}
       <div className="content-body">
@@ -279,11 +338,22 @@ function ContentCard({
           <span className={`content-type-badge content-type-${item.type}`}>
             {TYPE_LABELS[item.type]}
           </span>
-          {item.interest_score !== null && (
-            <span className="content-score" title="Interest score">
-              {Math.round(item.interest_score * 100)}%
-            </span>
-          )}
+          <span className="content-interest-btns">
+            <button
+              className={`interest-btn interest-up${item.user_interest === "up" ? " active" : ""}`}
+              onClick={(e) => handleInterestClick(e, "up")}
+              title="Interesting"
+            >
+              +
+            </button>
+            <button
+              className={`interest-btn interest-down${item.user_interest === "down" ? " active" : ""}`}
+              onClick={(e) => handleInterestClick(e, "down")}
+              title="Not interested"
+            >
+              -
+            </button>
+          </span>
         </div>
         <h3 className="content-title">{item.title}</h3>
         {description && <p className="content-desc">{description}</p>}

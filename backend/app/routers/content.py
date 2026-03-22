@@ -29,6 +29,7 @@ async def list_content(
     subscription_id: str | None = None,
     content_type: str | None = None,
     consumed: str | None = None,  # "true", "false", or None for all
+    interest: str | None = None,  # "up", "down", "none", or None for all
     q: str | None = None,
     size: int = Query(default=50, le=200),
     offset: int = 0,
@@ -48,6 +49,12 @@ async def list_content(
             {"term": {"consumed": False}},
             {"bool": {"must_not": {"exists": {"field": "consumed"}}}},
         ]}})
+    if interest == "up":
+        filter_clauses.append({"term": {"user_interest": "up"}})
+    elif interest == "down":
+        filter_clauses.append({"term": {"user_interest": "down"}})
+    elif interest == "none":
+        filter_clauses.append({"bool": {"must_not": {"exists": {"field": "user_interest"}}}})
     if q:
         must.append({
             "multi_match": {
@@ -86,6 +93,7 @@ async def list_content(
         "type": {"terms": {"field": "type", "size": 10}},
         "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
         "consumed": {"terms": {"field": "consumed", "missing": False}},
+        "interest": {"terms": {"field": "user_interest", "size": 10}},
     }
     aggs_body: dict[str, Any] = {
         "size": 0,
@@ -200,6 +208,65 @@ async def set_consumed(item_id: str, consumed: bool = True):
     es = get_es_client()
     await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"consumed": consumed})
     return {"id": item_id, "consumed": consumed}
+
+
+@router.put("/{item_id}/interest")
+async def set_interest(item_id: str, interest: str = "up"):
+    """Set interest on a content item: 'up', 'down', or 'none' to clear."""
+    es = get_es_client()
+    if interest == "none":
+        # Remove the field by setting to None via script
+        await es.update(
+            index=CONTENT_ITEMS_INDEX,
+            id=item_id,
+            script={"source": "ctx._source.remove('user_interest')"},
+        )
+    else:
+        await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"user_interest": interest})
+    return {"id": item_id, "interest": interest if interest != "none" else None}
+
+
+@router.post("/playback-progress")
+async def batch_playback_progress(item_ids: list[str]):
+    """Get playback progress for multiple content items at once."""
+    if not item_ids:
+        return {}
+    es = get_es_client()
+
+    # Get playback states
+    playback_resp = await es.search(
+        index=PLAYBACK_STATE_INDEX,
+        body={
+            "query": {"terms": {"content_item_id": item_ids}},
+            "size": len(item_ids),
+            "_source": ["content_item_id", "position_seconds"],
+        },
+    )
+
+    # Get durations from content items
+    content_resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {"ids": {"values": item_ids}},
+            "size": len(item_ids),
+            "_source": ["duration_seconds"],
+        },
+    )
+
+    durations = {
+        hit["_id"]: hit["_source"].get("duration_seconds", 0) or 0
+        for hit in content_resp["hits"]["hits"]
+    }
+
+    result = {}
+    for hit in playback_resp["hits"]["hits"]:
+        cid = hit["_source"]["content_item_id"]
+        pos = hit["_source"].get("position_seconds", 0) or 0
+        dur = durations.get(cid, 0)
+        pct = round((pos / dur) * 100) if dur > 0 else 0
+        result[cid] = {"position_seconds": pos, "duration_seconds": dur, "percent": min(pct, 100)}
+
+    return result
 
 
 @router.get("/export/csv")

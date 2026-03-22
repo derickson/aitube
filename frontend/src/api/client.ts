@@ -60,6 +60,7 @@ export interface ContentItem {
   interest_reasoning: string;
   transcript: Transcript | null;
   consumed: boolean;
+  user_interest: "up" | "down" | null;
   content_markdown: string;
   metadata: Record<string, unknown>;
 }
@@ -147,6 +148,7 @@ export function searchContent(params?: {
   subscription_id?: string;
   content_type?: ContentType;
   consumed?: "true" | "false";
+  interest?: "up" | "down" | "none";
   q?: string;
   size?: number;
   offset?: number;
@@ -155,6 +157,7 @@ export function searchContent(params?: {
   if (params?.subscription_id) search.set("subscription_id", params.subscription_id);
   if (params?.content_type) search.set("content_type", params.content_type);
   if (params?.consumed) search.set("consumed", params.consumed);
+  if (params?.interest) search.set("interest", params.interest);
   if (params?.q) search.set("q", params.q);
   if (params?.size !== undefined) search.set("size", String(params.size));
   if (params?.offset !== undefined) search.set("offset", String(params.offset));
@@ -172,6 +175,23 @@ export function transcribeContentItem(id: string): Promise<{ status: string; tra
 
 export function setConsumed(id: string, consumed: boolean): Promise<{ id: string; consumed: boolean }> {
   return apiFetch(`/content/${id}/consumed?consumed=${consumed}`, { method: "PUT" });
+}
+
+export function setInterest(id: string, interest: "up" | "down" | "none"): Promise<{ id: string; interest: string | null }> {
+  return apiFetch(`/content/${id}/interest?interest=${interest}`, { method: "PUT" });
+}
+
+export interface PlaybackProgress {
+  position_seconds: number;
+  duration_seconds: number;
+  percent: number;
+}
+
+export function batchPlaybackProgress(itemIds: string[]): Promise<Record<string, PlaybackProgress>> {
+  return apiFetch("/content/playback-progress", {
+    method: "POST",
+    body: JSON.stringify(itemIds),
+  });
 }
 
 // --- Playback ---
