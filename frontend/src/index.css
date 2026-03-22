@@ -1499,6 +1499,132 @@ main:has(.flyout-open) {
 .sidebar-close { display: none; }
 
 /* ==============================
+   Add Content Page
+   ============================== */
+.add-content-page {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.add-content-page h2 {
+  margin: 0 0 0.5rem;
+}
+
+.add-content-hint {
+  color: var(--text-muted);
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+}
+
+.add-content-input-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.add-content-url-input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.add-content-preview-card {
+  display: flex;
+  gap: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  align-items: flex-start;
+}
+
+.add-content-thumb {
+  width: 160px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.add-content-preview-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.add-content-preview-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.add-content-duration {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.add-content-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.add-content-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.add-content-author {
+  color: var(--text-muted);
+}
+
+.add-content-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.add-content-exists-note {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.add-content-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.add-content-queued {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: var(--text);
+  margin: 0;
+}
+
+.add-content-exists {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ==============================
    Mobile Responsive Overrides
    ============================== */
 @media (max-width: 768px) {
@@ -1582,6 +1708,14 @@ main:has(.flyout-open) {
   }
 
   .form-row select {
+    width: 100%;
+  }
+
+  .add-content-input-row {
+    flex-direction: column;
+  }
+
+  .add-content-url-input {
     width: 100%;
   }
 }

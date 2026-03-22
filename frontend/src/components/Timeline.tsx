@@ -158,9 +158,20 @@ export function Timeline() {
   const typeBuckets = facets.type ?? [];
   const consumedBuckets = facets.consumed ?? [];
   const interestBuckets = facets.interest ?? [];
+  // Build a fallback source_name map from items' metadata (for manually-added content with no subscription)
+  const manualSourceNames: Record<string, string> = {};
+  for (const item of items) {
+    if (!subs[item.subscription_id]) {
+      const sn = (item.metadata as Record<string, unknown>)?.source_name?.toString();
+      if (sn && !manualSourceNames[item.subscription_id]) {
+        manualSourceNames[item.subscription_id] = sn;
+      }
+    }
+  }
+
   const subBuckets = (facets.subscription_id ?? []).sort((a, b) => {
-    const nameA = subs[a.key]?.name ?? a.key;
-    const nameB = subs[b.key]?.name ?? b.key;
+    const nameA = subs[a.key]?.name ?? manualSourceNames[a.key] ?? a.key;
+    const nameB = subs[b.key]?.name ?? manualSourceNames[b.key] ?? b.key;
     return nameA.localeCompare(nameB);
   });
 
@@ -263,7 +274,7 @@ export function Timeline() {
               <span>All</span>
             </button>
             {subBuckets.map((b) => {
-              const name = subs[b.key]?.name ?? b.key;
+              const name = subs[b.key]?.name ?? manualSourceNames[b.key] ?? b.key;
               const label = name.length > 15 ? name.slice(0, 15) + "…" : name;
               return (
                 <button
@@ -294,7 +305,7 @@ export function Timeline() {
                 <ContentCard
                   key={item.id}
                   item={item}
-                  subName={subs[item.subscription_id]?.name ?? ""}
+                  subName={subs[item.subscription_id]?.name ?? (item.metadata as Record<string, unknown>)?.source_name?.toString() ?? ""}
                   isActive={item.id === selectedId}
                   isConsumed={consumedIds.has(item.id)}
                   progress={progress[item.id]}
@@ -310,7 +321,12 @@ export function Timeline() {
         {selectedId && (
           <ContentView
             itemId={selectedId}
-            subName={subs[items.find(i => i.id === selectedId)?.subscription_id ?? ""]?.name ?? ""}
+            subName={(() => {
+              const activeItem = items.find(i => i.id === selectedId);
+              return subs[activeItem?.subscription_id ?? ""]?.name
+                ?? (activeItem?.metadata as Record<string, unknown>)?.source_name?.toString()
+                ?? "";
+            })()}
             onClose={() => setSelectedId(null)}
             onConsumedChange={handleConsumedChange}
           />
