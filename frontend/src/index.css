@@ -1575,6 +1575,35 @@ main:has(.flyout-open) {
   font-style: italic;
 }
 
+.reader-article code {
+  background: var(--bg-secondary);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-family: monospace;
+}
+
+.reader-code-block {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  overflow-x: auto;
+  margin: 1rem 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.reader-code-block code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-family: monospace;
+  white-space: pre;
+}
+
 /* Mobile-hidden elements (shown via media query) */
 .sidebar-toggle { display: none; }
 .sidebar-close { display: none; }
