@@ -645,24 +645,70 @@ function ArticleReader({ item, onConsumed }: { item: ContentItem; onConsumed?: (
 
   const renderContent = (text: string) => {
     if (!text) return null;
-    return text.split(/\n\n+/).map((block, i) => {
-      const trimmed = block.trim();
-      if (!trimmed) return null;
-      if (trimmed.startsWith("# ")) return <h2 key={i}>{trimmed.slice(2)}</h2>;
-      if (trimmed.startsWith("## ")) return <h3 key={i}>{trimmed.slice(3)}</h3>;
-      if (trimmed.startsWith("### ")) return <h4 key={i}>{trimmed.slice(4)}</h4>;
-      if (trimmed.startsWith("![")) {
-        const imgMatch = trimmed.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-        if (imgMatch) return <ReaderImage key={i} src={imgMatch[2]} alt={imgMatch[1]} />;
+
+    // Split on fenced code blocks first, preserving them as separate segments
+    const segments: { type: "text" | "code"; content: string }[] = [];
+    const codeBlockRegex = /```(?:\w*)\n?([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        segments.push({ type: "text", content: text.slice(lastIndex, match.index) });
       }
-      return <p key={i} dangerouslySetInnerHTML={{ __html: inlineMarkdown(trimmed) }} />;
-    });
+      segments.push({ type: "code", content: match[1] });
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      segments.push({ type: "text", content: text.slice(lastIndex) });
+    }
+
+    const result: React.ReactNode[] = [];
+    let key = 0;
+
+    for (const segment of segments) {
+      if (segment.type === "code") {
+        result.push(
+          <pre key={key++} className="reader-code-block">
+            <code>{segment.content.trimEnd()}</code>
+          </pre>
+        );
+      } else {
+        for (const block of segment.content.split(/\n\n+/)) {
+          const trimmed = block.trim();
+          if (!trimmed) continue;
+          const k = key++;
+          if (trimmed.startsWith("# ")) {
+            result.push(<h2 key={k}>{trimmed.slice(2)}</h2>);
+          } else if (trimmed.startsWith("## ")) {
+            result.push(<h3 key={k}>{trimmed.slice(3)}</h3>);
+          } else if (trimmed.startsWith("### ")) {
+            result.push(<h4 key={k}>{trimmed.slice(4)}</h4>);
+          } else if (trimmed.startsWith("![")) {
+            const imgMatch = trimmed.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+            if (imgMatch) result.push(<ReaderImage key={k} src={imgMatch[2]} alt={imgMatch[1]} />);
+          } else if (trimmed.startsWith("`") && trimmed.endsWith("`") && !trimmed.slice(1, -1).includes("`")) {
+            // Entire block wrapped in single backticks — render as a code block
+            result.push(
+              <pre key={k} className="reader-code-block">
+                <code>{trimmed.slice(1, -1)}</code>
+              </pre>
+            );
+          } else {
+            result.push(<p key={k} dangerouslySetInnerHTML={{ __html: inlineMarkdown(trimmed) }} />);
+          }
+        }
+      }
+    }
+
+    return result;
   };
 
   const inlineMarkdown = (text: string): string => {
     return text
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/_(.+?)_/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   };
 
