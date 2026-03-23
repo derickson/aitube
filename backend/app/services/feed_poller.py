@@ -129,6 +129,11 @@ def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any] | None:
     if "/shorts/" in link_href:
         return None
 
+    # Skip unreleased premieres/scheduled videos (0 views = not yet available)
+    stats_tag = entry.find("media:statistics") or entry.find("statistics")
+    if stats_tag and stats_tag.get("views") == "0":
+        return None
+
     title_tag = entry.find("title")
     title = title_tag.get_text(strip=True) if title_tag else "Untitled"
 
