@@ -172,9 +172,6 @@ export function Timeline() {
           <button className="btn sidebar-toggle" onClick={() => setSidebarOpen((s) => !s)}>Filters</button>
           <h2>Timeline</h2>
         </div>
-        <span className="timeline-count">
-          {items.length} of {total} items
-        </span>
       </div>
 
       {error && <ErrorBanner error={error} />}
