@@ -11,6 +11,10 @@ from backend.app.services.elasticsearch import close_es_client, ensure_indices
 
 logger = logging.getLogger(__name__)
 
+# Reduce noise from HTTP client and Elasticsearch transport during polling
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("elastic_transport.transport").setLevel(logging.WARNING)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

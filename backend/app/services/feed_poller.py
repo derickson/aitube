@@ -481,7 +481,19 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
         doc_id = str(uuid.uuid4())
         await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)
         new_ids.append(doc_id)
-        logger.info("New content: %s — %s", doc["title"], doc_id)
+
+        # Build a single detailed log line summarizing all processing for this item
+        actions = []
+        if doc.get("transcript"):
+            actions.append("transcript")
+        if doc.get("content_markdown"):
+            actions.append("article-scraped")
+        if doc.get("summary"):
+            actions.append("summarized")
+        if doc.get("duration_seconds"):
+            actions.append(f"duration={doc['duration_seconds']}s")
+        actions_str = ", ".join(actions) if actions else "metadata-only"
+        logger.info("New %s: '%s' [%s] — %s", doc["type"], doc["title"], actions_str, doc_id)
 
         # If an ad was detected, set the playback position to skip past it
         if ad_skip_to is not None and ad_skip_to > 0:
@@ -692,7 +704,8 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
                 body={"doc": update_fields},
             )
             backfilled += 1
-            logger.info("Backfill: fetched transcript for '%s' (%s)", title[:60], doc_id)
+            fields = list(update_fields.keys())
+            logger.info("Backfill: updated '%s' [%s] — %s", title[:60], ", ".join(fields), doc_id)
 
         except Exception as e:
             logger.warning("Backfill: failed for '%s' (%s): %s", title[:60], doc_id, e)

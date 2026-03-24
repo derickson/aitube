@@ -7,6 +7,9 @@ from backend.app.services.feed_poller import poll_all_active
 from backend.app.services.elasticsearch import close_es_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# Reduce noise from HTTP client and Elasticsearch transport during polling
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("elastic_transport.transport").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
