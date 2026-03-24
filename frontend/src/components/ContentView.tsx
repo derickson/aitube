@@ -566,11 +566,28 @@ function TranscriptViewer({
     return currentTime >= chunk.start && (!next || currentTime < next.start);
   }) ?? -1;
 
-  // Auto-scroll to active chunk, or to top if playback hasn't reached first chunk
+  // Auto-scroll to active chunk, or to top if playback hasn't reached first chunk.
+  // Use manual scroll on the nearest scrollable ancestor rather than scrollIntoView,
+  // which would propagate to all ancestor scroll containers (including the page) and
+  // cause the left timeline panel to scroll unexpectedly.
   useEffect(() => {
     if (activeIndex >= 0 && activeIndex !== lastScrolledIndex.current && activeRef.current) {
       lastScrolledIndex.current = activeIndex;
-      activeRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      const activeEl = activeRef.current;
+      // Find the nearest scrollable ancestor
+      let scrollParent: Element | null = activeEl.parentElement;
+      while (scrollParent && scrollParent !== document.documentElement) {
+        const overflow = getComputedStyle(scrollParent).overflowY;
+        if (overflow === "auto" || overflow === "scroll") break;
+        scrollParent = scrollParent.parentElement;
+      }
+      if (scrollParent && scrollParent !== document.documentElement) {
+        const parentRect = scrollParent.getBoundingClientRect();
+        const activeRect = activeEl.getBoundingClientRect();
+        const offset =
+          activeRect.top - parentRect.top - scrollParent.clientHeight / 2 + activeEl.clientHeight / 2;
+        scrollParent.scrollBy({ top: offset, behavior: "smooth" });
+      }
     } else if (activeIndex === -1 && lastScrolledIndex.current === -1 && containerRef.current) {
       containerRef.current.scrollTop = 0;
     }
