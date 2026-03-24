@@ -715,6 +715,93 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
     return backfilled
 
 
+async def backfill_missing_summaries(limit: int = 10) -> int:
+    """Generate summaries for recent content items that are missing them.
+
+    Only targets items from the last 5 days that have transcript or article
+    content available.  Processes at most `limit` items per cycle.
+    Returns the number of items successfully backfilled.
+    """
+    from backend.app.services.summarizer import summarize_content
+
+    es = get_es_client()
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "must": [
+                        {"range": {"discovered_at": {"gte": "now-5d"}}},
+                    ],
+                }
+            },
+            "_source": ["title", "url", "type", "transcript", "content_markdown", "metadata", "summary"],
+            "size": 200,
+        },
+    )
+
+    # Filter to items missing a summary but having content to summarize
+    candidates = []
+    for hit in resp["hits"]["hits"]:
+        src = hit["_source"]
+        if src.get("summary"):
+            continue
+        transcript = src.get("transcript")
+        has_transcript = isinstance(transcript, dict) and transcript.get("text")
+        has_content = bool(src.get("content_markdown"))
+        if has_transcript or has_content:
+            candidates.append(hit)
+
+    if not candidates:
+        return 0
+
+    backfilled = 0
+    for hit in candidates[:limit]:
+        doc_id = hit["_id"]
+        src = hit["_source"]
+        title = src.get("title", "?")
+        content_type = src.get("type", "article")
+
+        try:
+            transcript = src.get("transcript")
+            transcript_text = ""
+            transcript_chunks = None
+            if isinstance(transcript, dict):
+                transcript_text = transcript.get("text", "")
+                if transcript.get("chunks"):
+                    transcript_chunks = transcript["chunks"]
+
+            source_text = transcript_text or src.get("content_markdown", "")
+            description = src.get("metadata", {}).get("description", "")
+            author = src.get("metadata", {}).get("author", "")
+
+            summary = await summarize_content(
+                title=title,
+                content_type=content_type,
+                transcript_text=source_text,
+                description=description,
+                author=author,
+                transcript_chunks=transcript_chunks,
+            )
+            if summary:
+                await es.update(
+                    index=CONTENT_ITEMS_INDEX,
+                    id=doc_id,
+                    body={"doc": {"summary": summary}},
+                )
+                backfilled += 1
+                logger.info("Backfill: generated summary for '%s' (%s)", title[:60], doc_id)
+            else:
+                logger.warning("Backfill: summarize_content returned None for '%s'", title[:60])
+
+        except Exception as e:
+            logger.warning("Backfill summary: failed for '%s' (%s): %s", title[:60], doc_id, e)
+
+    if backfilled:
+        logger.info("Backfilled summaries for %d item(s)", backfilled)
+    return backfilled
+
+
 async def poll_all_active() -> dict[str, list[str]]:
     """Poll all active subscriptions. Returns {subscription_id: [new_content_ids]}."""
     es = get_es_client()
@@ -751,5 +838,8 @@ async def poll_all_active() -> dict[str, list[str]]:
 
     # Retry transcript fetch for videos that failed on initial poll
     await backfill_missing_transcripts()
+
+    # Generate summaries for recent items that are missing them
+    await backfill_missing_summaries()
 
     return results

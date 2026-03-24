@@ -1,5 +1,6 @@
 """Generate brief AI summaries of content using Claude."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -78,13 +79,15 @@ Include timestamps in [M:SS] or [H:MM:SS] format at the start of each bullet poi
     elif content_type == "article":
         timestamp_instruction = ""
 
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=600,
-            messages=[{
-                "role": "user",
-                "content": f"""Summarize this {type_label}. Your goal is to clarify what it's actually about — cut through any clickbait or vague titling to tell the reader the real topic, the creator's opinion or thesis, and what they'll get from it.
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=600,
+                messages=[{
+                    "role": "user",
+                    "content": f"""Summarize this {type_label}. Your goal is to clarify what it's actually about — cut through any clickbait or vague titling to tell the reader the real topic, the creator's opinion or thesis, and what they'll get from it.
 
 First, write a 2-3 sentence summary that is direct and specific.
 
@@ -98,18 +101,30 @@ Title: {title}
 
 Content:
 {source_text}""",
-            }],
-        )
+                }],
+            )
 
-        summary = response.content[0].text.strip()
-        # Strip common unwanted heading prefixes the model sometimes adds
-        for prefix in ("## Summary\n", "## Summary\r\n", "**Summary:**\n", "**Summary**\n"):
-            if summary.startswith(prefix):
-                summary = summary[len(prefix):].lstrip()
-                break
-        logger.info("Generated summary for: %s (%d chars)", title[:50], len(summary))
-        return summary
+            summary = response.content[0].text.strip()
+            # Strip common unwanted heading prefixes the model sometimes adds
+            for prefix in ("## Summary\n", "## Summary\r\n", "**Summary:**\n", "**Summary**\n"):
+                if summary.startswith(prefix):
+                    summary = summary[len(prefix):].lstrip()
+                    break
+            logger.info("Generated summary for: %s (%d chars)", title[:50], len(summary))
+            return summary
 
-    except Exception as e:
-        logger.warning("Summarization failed for %s: %s", title[:50], e)
-        return None
+        except anthropic.RateLimitError:
+            if attempt < max_retries - 1:
+                logger.warning("Rate limited (429) summarizing %s, retrying in 5s (attempt %d/%d)",
+                               title[:50], attempt + 1, max_retries)
+                await asyncio.sleep(5)
+            else:
+                logger.warning("Rate limited (429) summarizing %s, all %d attempts exhausted",
+                               title[:50], max_retries)
+                return None
+
+        except Exception as e:
+            logger.warning("Summarization failed for %s: %s", title[:50], e)
+            return None
+
+    return None
