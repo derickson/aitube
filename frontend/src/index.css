@@ -1017,6 +1017,10 @@ main:has(.flyout-open) {
   padding: 0.3rem 0.6rem;
 }
 
+.flyout-desc-wrapper {
+  margin-bottom: 0.5rem;
+}
+
 .flyout-desc {
   color: var(--text-secondary);
   font-size: 0.8rem;
@@ -1025,6 +1029,30 @@ main:has(.flyout-open) {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.flyout-desc p {
+  margin: 0;
+}
+
+.flyout-desc-expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.flyout-desc-expanded p + p {
+  margin-top: 0.5rem;
+}
+
+.flyout-desc-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
 }
 
 .flyout-scroll {

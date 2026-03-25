@@ -19,6 +19,21 @@ function formatTimestamp(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function descriptionToHtml(text: string): string {
+  // Escape HTML entities first to prevent XSS
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  // Convert double newlines to paragraph breaks, single newlines to <br>
+  const paragraphs = escaped.split(/\n\n+/);
+  return paragraphs
+    .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
 function renderInlineMarkdown(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -68,6 +83,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [activeTab, setActiveTab] = useState("summary");
+  const [descExpanded, setDescExpanded] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
@@ -106,6 +122,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   useEffect(() => {
     panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveTab("summary");
+    setDescExpanded(false);
   }, [itemId]);
 
   if (loading) {
@@ -161,7 +178,20 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
             <button className="btn" onClick={onClose}>Close</button>
           </div>
         </div>
-        {description && <p className="flyout-desc">{description}</p>}
+        {description && (
+          <div className="flyout-desc-wrapper">
+            <div
+              className={`flyout-desc${descExpanded ? " flyout-desc-expanded" : ""}`}
+              dangerouslySetInnerHTML={{ __html: descriptionToHtml(description) }}
+            />
+            <button
+              className="flyout-desc-toggle"
+              onClick={() => setDescExpanded((v) => !v)}
+            >
+              {descExpanded ? "Show less" : "Show more"}
+            </button>
+          </div>
+        )}
 
         {item.type === "video" && (
           <YouTubePlayer
