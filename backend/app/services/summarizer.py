@@ -21,7 +21,7 @@ def _format_timestamp(seconds: float) -> str:
     return f"{m}:{s:02d}"
 
 
-def _build_timestamped_transcript(chunks: list[dict[str, Any]], max_chars: int = 4000) -> str:
+def _build_timestamped_transcript(chunks: list[dict[str, Any]], max_chars: int = 100000) -> str:
     """Build a transcript string with timestamps from chunks."""
     lines = []
     total = 0
@@ -62,7 +62,7 @@ async def summarize_content(
     if has_timestamps and content_type in ("video", "podcast_episode"):
         source_text = _build_timestamped_transcript(transcript_chunks)
     else:
-        source_text = transcript_text[:4000] if transcript_text else description[:1000]
+        source_text = transcript_text[:100000] if transcript_text else description[:2000]
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
@@ -83,15 +83,15 @@ Include timestamps in [M:SS] or [H:MM:SS] format at the start of each bullet poi
     for attempt in range(max_retries):
         try:
             response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=600,
+                model="claude-haiku-4-5-20251001",
+                max_tokens=800,
                 messages=[{
                     "role": "user",
                     "content": f"""Summarize this {type_label}. Your goal is to clarify what it's actually about — cut through any clickbait or vague titling to tell the reader the real topic, the creator's opinion or thesis, and what they'll get from it.
 
 First, write a 2-3 sentence summary that is direct and specific.
 
-Then, add a bulleted breakdown of the key topics or sections covered. Use 3-8 bullet points. Each bullet should be a concise phrase or sentence.{timestamp_instruction}
+Then, list exactly 5 key insights or takeaway learnings from the full content. Each bullet should be a concise but meaningful sentence describing a specific insight, argument, or conclusion.{timestamp_instruction}
 
 Format the bullets as a markdown list (- item).
 
