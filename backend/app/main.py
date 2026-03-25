@@ -40,13 +40,17 @@ app.add_middleware(
 )
 
 if settings.elastic_apm_server_url:
-    apm_client = make_apm_client({
+    apm_config = {
         "SERVICE_NAME": "aitube-backend",
         "SERVER_URL": settings.elastic_apm_server_url,
-        "SECRET_TOKEN": settings.elastic_apm_secret_token,
         "ENVIRONMENT": settings.elastic_apm_environment,
         "CAPTURE_BODY": "transactions",
-    })
+    }
+    if settings.elastic_apm_api_key:
+        apm_config["API_KEY"] = settings.elastic_apm_api_key
+    elif settings.elastic_apm_secret_token:
+        apm_config["SECRET_TOKEN"] = settings.elastic_apm_secret_token
+    apm_client = make_apm_client(apm_config)
     app.add_middleware(ElasticAPM, client=apm_client)
 
 app.include_router(subscriptions.router)

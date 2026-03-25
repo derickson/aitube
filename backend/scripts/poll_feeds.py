@@ -19,12 +19,16 @@ logger = logging.getLogger(__name__)
 async def _run():
     apm_client = None
     if settings.elastic_apm_server_url:
-        apm_client = elasticapm.Client(
-            service_name="aitube-poller",
-            server_url=settings.elastic_apm_server_url,
-            secret_token=settings.elastic_apm_secret_token,
-            environment=settings.elastic_apm_environment,
-        )
+        apm_kwargs = {
+            "service_name": "aitube-poller",
+            "server_url": settings.elastic_apm_server_url,
+            "environment": settings.elastic_apm_environment,
+        }
+        if settings.elastic_apm_api_key:
+            apm_kwargs["api_key"] = settings.elastic_apm_api_key
+        elif settings.elastic_apm_secret_token:
+            apm_kwargs["secret_token"] = settings.elastic_apm_secret_token
+        apm_client = elasticapm.Client(**apm_kwargs)
         elasticapm.instrument()
 
     try:

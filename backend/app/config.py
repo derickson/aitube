@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Elastic APM (Observability)
     elastic_apm_server_url: str = ""
     elastic_apm_secret_token: str = ""
+    elastic_apm_api_key: str = ""
     elastic_apm_environment: str = "development"
 
     # Polling
