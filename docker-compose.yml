@@ -15,6 +15,9 @@ services:
     build:
       context: frontend
       dockerfile: Dockerfile
+      args:
+        - VITE_ELASTIC_APM_SERVER_URL=${VITE_ELASTIC_APM_SERVER_URL:-}
+        - VITE_ELASTIC_APM_ENVIRONMENT=${VITE_ELASTIC_APM_ENVIRONMENT:-development}
     ports:
       - "8103:80"
     depends_on:

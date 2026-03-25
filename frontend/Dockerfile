@@ -1,5 +1,8 @@
 FROM node:22-alpine AS build
 
+ARG VITE_ELASTIC_APM_SERVER_URL=""
+ARG VITE_ELASTIC_APM_ENVIRONMENT="development"
+
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install

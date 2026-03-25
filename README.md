@@ -97,6 +97,20 @@ Set in `.env`:
 | `YOUTUBE_MAX_AGE_DAYS` | `5` | Only poll YouTube videos newer than this |
 | `PODCAST_MAX_AGE_DAYS` | `5` | Only poll podcast episodes newer than this |
 | `RSS_MAX_AGE_DAYS` | `90` | Only poll RSS articles newer than this |
+| `ELASTIC_APM_SERVER_URL` | | Elastic APM server URL (enables backend observability) |
+| `ELASTIC_APM_API_KEY` | | APM agent API key (for Elastic Cloud Serverless) |
+| `ELASTIC_APM_SECRET_TOKEN` | | APM secret token (for self-managed APM Server) |
+| `ELASTIC_APM_ENVIRONMENT` | `development` | APM environment label |
+| `VITE_ELASTIC_APM_SERVER_URL` | | APM server URL for frontend RUM (build-time) |
+| `VITE_ELASTIC_APM_ENVIRONMENT` | `development` | APM environment for frontend RUM (build-time) |
+
+### Observability (Elastic APM)
+
+Optional. Set `ELASTIC_APM_SERVER_URL` to enable backend tracing (services: `aitube-backend`, `aitube-poller`). Set `VITE_ELASTIC_APM_SERVER_URL` to enable frontend Real User Monitoring (service: `aitube-frontend`).
+
+**Auth:** Use `ELASTIC_APM_API_KEY` for Elastic Cloud Serverless (create via Kibana `POST kbn:/api/apm/agent_keys`), or `ELASTIC_APM_SECRET_TOKEN` for self-managed APM Server. If both are set, API key takes precedence. Frontend RUM requires no secret — the public APM URL is sufficient.
+
+**Note:** Frontend APM vars (`VITE_*`) are baked in at Docker build time. Rebuild the frontend container after changing them.
 
 ## Adding Subscriptions
 

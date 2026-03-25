@@ -62,6 +62,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 - **Date normalization** (`_normalize_date_to_iso`) handles RFC 2822 and other formats before ES indexing
 - **Article cleanup** uses deterministic pre-clean to strip nav/footer patterns, then Claude Haiku for final polish using head+tail strategy for long articles
 - **Auto-mark-viewed** triggers at 90% playback for videos/podcasts, or on article flyout open
+- **APM auth** supports both API key (Elastic Cloud Serverless) and secret token (self-managed). API key takes precedence if both are set. Frontend RUM vars (`VITE_*`) are build-time only — requires Docker rebuild to change.
 
 ### Elasticsearch Indices
 

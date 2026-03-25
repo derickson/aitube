@@ -7,6 +7,7 @@ from typing import Any
 import anthropic
 
 from backend.app.config import settings
+from backend.app.services.anthropic_client import get_anthropic_client, traced_messages_create
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def summarize_content(
     else:
         source_text = transcript_text[:100000] if transcript_text else description[:2000]
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = get_anthropic_client()
 
     type_label = {
         "video": "YouTube video",
@@ -82,7 +83,8 @@ Include timestamps in [M:SS] or [H:MM:SS] format at the start of each bullet poi
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = client.messages.create(
+            response = traced_messages_create(
+                client,
                 model="claude-haiku-4-5-20251001",
                 max_tokens=800,
                 messages=[{

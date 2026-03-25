@@ -4,12 +4,14 @@ import json
 import logging
 
 import anthropic
+import elasticapm
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.app.config import settings
 from backend.app.services.agents import build_system_prompt, get_agent, get_agents
+from backend.app.services.anthropic_client import get_async_anthropic_client
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
 
 logger = logging.getLogger(__name__)
@@ -64,7 +66,8 @@ async def stream_chat(item_id: str, req: ChatRequest):
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
     async def event_stream():
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        client = get_async_anthropic_client()
+        elasticapm.label(anthropic_model=agent.model, anthropic_streaming=True)
         try:
             async with client.messages.stream(
                 model=agent.model,

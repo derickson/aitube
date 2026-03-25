@@ -9,6 +9,9 @@ from backend.app.config import settings
 from backend.app.routers import subscriptions, content, playback, polling, chat
 from backend.app.services.elasticsearch import close_es_client, ensure_indices
 
+if settings.elastic_apm_server_url:
+    from elasticapm.contrib.starlette import make_apm_client, ElasticAPM
+
 logger = logging.getLogger(__name__)
 
 # Reduce noise from HTTP client and Elasticsearch transport during polling
@@ -35,6 +38,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if settings.elastic_apm_server_url:
+    apm_config = {
+        "SERVICE_NAME": "aitube-backend",
+        "SERVER_URL": settings.elastic_apm_server_url,
+        "ENVIRONMENT": settings.elastic_apm_environment,
+        "CAPTURE_BODY": "transactions",
+    }
+    if settings.elastic_apm_api_key:
+        apm_config["API_KEY"] = settings.elastic_apm_api_key
+    elif settings.elastic_apm_secret_token:
+        apm_config["SECRET_TOKEN"] = settings.elastic_apm_secret_token
+    apm_client = make_apm_client(apm_config)
+    app.add_middleware(ElasticAPM, client=apm_client)
 
 app.include_router(subscriptions.router)
 app.include_router(content.router)
