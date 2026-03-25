@@ -68,6 +68,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [activeTab, setActiveTab] = useState("summary");
+  const [descExpanded, setDescExpanded] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
@@ -102,10 +103,11 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
       .finally(() => setLoading(false));
   }, [itemId]);
 
-  // Scroll panel into view and reset tab when opened
+  // Scroll panel into view and reset tab/desc when opened
   useEffect(() => {
     panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveTab("summary");
+    setDescExpanded(false);
   }, [itemId]);
 
   if (loading) {
@@ -161,7 +163,19 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
             <button className="btn" onClick={onClose}>Close</button>
           </div>
         </div>
-        {description && <p className="flyout-desc">{description}</p>}
+        {description && (
+          <div className="flyout-desc-wrapper">
+            <p className={`flyout-desc${descExpanded ? " flyout-desc-expanded" : ""}`}>
+              {description}
+            </p>
+            <button
+              className="flyout-desc-toggle"
+              onClick={() => setDescExpanded((v) => !v)}
+            >
+              {descExpanded ? "Show less" : "Show more"}
+            </button>
+          </div>
+        )}
 
         {item.type === "video" && (
           <YouTubePlayer
