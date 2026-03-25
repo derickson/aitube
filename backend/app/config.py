@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # Content-DLP
     content_dlp_url: str = "http://localhost:7055"
 
+    # Elastic APM (Observability)
+    elastic_apm_server_url: str = ""
+    elastic_apm_secret_token: str = ""
+    elastic_apm_environment: str = "development"
+
     # Polling
     youtube_max_age_days: int = 5
     podcast_max_age_days: int = 5
