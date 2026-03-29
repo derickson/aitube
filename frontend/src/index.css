@@ -1057,14 +1057,14 @@ main:has(.flyout-open) {
 
 .flyout-scroll {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 1rem 1.25rem;
   display: flex;
   flex-direction: column;
 }
 
-.flyout-scroll.transcript-active {
-  overflow-y: auto;
+.flyout-scroll.chat-active {
+  overflow: hidden;
 }
 
 .flyout-summary {
@@ -1171,10 +1171,6 @@ main:has(.flyout-open) {
 .chat-tab-panel {
   flex-direction: column;
   flex: 1;
-  overflow: hidden;
-}
-
-.flyout-scroll.chat-active {
   overflow: hidden;
 }
 

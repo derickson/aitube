@@ -213,7 +213,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
         )}
       </div>
 
-      <div className={`flyout-scroll${activeTab === "transcript" ? " transcript-active" : ""}${activeTab === "chat" ? " chat-active" : ""}`}>
+      <div className={`flyout-scroll${activeTab === "chat" ? " chat-active" : ""}`}>
         <ContentTabs
           tabs={[
             { id: "summary", label: "Summary" },
@@ -272,6 +272,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
               <TranscriptViewer
                 transcript={item.transcript}
                 currentTime={currentTime}
+                isActive={activeTab === "transcript"}
                 onSeek={(time) => {
                   if (item.type === "podcast_episode") {
                     audioSeekRef.current?.(time);
@@ -580,10 +581,12 @@ function AudioPlayer({
 function TranscriptViewer({
   transcript,
   currentTime = 0,
+  isActive = true,
   onSeek,
 }: {
   transcript: { text: string; chunks: { text: string; start: number; end: number }[] };
   currentTime?: number;
+  isActive?: boolean;
   onSeek?: (time: number) => void;
 }) {
   const activeRef = useRef<HTMLDivElement>(null);
@@ -601,6 +604,7 @@ function TranscriptViewer({
   // which would propagate to all ancestor scroll containers (including the page) and
   // cause the left timeline panel to scroll unexpectedly.
   useEffect(() => {
+    if (!isActive) return;
     if (activeIndex >= 0 && activeIndex !== lastScrolledIndex.current && activeRef.current) {
       lastScrolledIndex.current = activeIndex;
       const activeEl = activeRef.current;
@@ -621,7 +625,7 @@ function TranscriptViewer({
     } else if (activeIndex === -1 && lastScrolledIndex.current === -1 && containerRef.current) {
       containerRef.current.scrollTop = 0;
     }
-  }, [activeIndex]);
+  }, [activeIndex, isActive]);
 
   return (
     <div className="transcript-viewer">
