@@ -1,9 +1,11 @@
+import json
 import logging
 import re
 import uuid
 import warnings
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -330,15 +332,62 @@ def _filter_by_age(items: list[dict[str, Any]], max_age_days: int) -> list[dict[
     return filtered
 
 
-async def _get_existing_external_ids(subscription_id: str) -> set[str]:
-    """Return set of external_ids already stored for this subscription."""
+# ---------------------------------------------------------------------------
+# Local dedup cache — avoids large ES queries when feed items are already seen
+# ---------------------------------------------------------------------------
+
+_DEDUPE_CACHE_PATH = Path("/tmp/aitube_dedupe_cache.json")
+# Number of external_ids to retain per subscription (covers many poll cycles)
+_DEDUPE_CACHE_SIZE = 200
+
+
+def _load_dedupe_cache() -> dict[str, list[str]]:
+    """Load the local dedup cache from disk. Returns {} on any error."""
+    if _DEDUPE_CACHE_PATH.exists():
+        try:
+            return json.loads(_DEDUPE_CACHE_PATH.read_text())
+        except Exception as e:
+            logger.warning("Failed to load dedupe cache: %s", e)
+    return {}
+
+
+def _save_dedupe_cache(cache: dict[str, list[str]]) -> None:
+    """Persist the local dedup cache to disk."""
+    try:
+        _DEDUPE_CACHE_PATH.write_text(json.dumps(cache))
+    except Exception as e:
+        logger.warning("Failed to save dedupe cache: %s", e)
+
+
+def _cache_add_ids(
+    cache: dict[str, list[str]], subscription_id: str, external_ids: list[str]
+) -> None:
+    """Prepend external_ids into the cache for a subscription, capping at _DEDUPE_CACHE_SIZE."""
+    existing = cache.get(subscription_id, [])
+    merged = list(dict.fromkeys(external_ids + existing))
+    cache[subscription_id] = merged[:_DEDUPE_CACHE_SIZE]
+
+
+async def _check_external_ids_in_es(
+    subscription_id: str, external_ids: list[str]
+) -> set[str]:
+    """Return which of the given external_ids already exist in ES for this subscription."""
+    if not external_ids:
+        return set()
     es = get_es_client()
     resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
         body={
-            "query": {"term": {"subscription_id": subscription_id}},
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"subscription_id": subscription_id}},
+                        {"terms": {"external_id": external_ids}},
+                    ]
+                }
+            },
             "_source": ["external_id"],
-            "size": 10000,
+            "size": len(external_ids),
         },
     )
     return {hit["_source"]["external_id"] for hit in resp["hits"]["hits"]}
@@ -367,12 +416,45 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
         logger.error("Failed to fetch content for %s: %s", subscription.name, e)
         return []
 
-    existing_ids = await _get_existing_external_ids(subscription.id)
+    # Parse all feed items up front so we can batch-check against cache and ES
+    docs = [_parse_dlp_item(item_raw, subscription) for item_raw in items_raw]
+    feed_external_ids = [doc["external_id"] for doc in docs]
+
+    # --- Cache-first dedup -------------------------------------------------
+    cache = _load_dedupe_cache()
+    cached_ids: set[str] = set(cache.get(subscription.id, []))
+
+    cache_misses = [eid for eid in feed_external_ids if eid not in cached_ids]
+
+    if cache_misses:
+        es_existing = await _check_external_ids_in_es(subscription.id, cache_misses)
+        # Populate cache with confirmed-existing IDs so future polls skip ES
+        _cache_add_ids(cache, subscription.id, list(es_existing))
+        _save_dedupe_cache(cache)
+        logger.debug(
+            "%s: %d feed item(s), %d cache hit(s), %d ES query(s), %d already exist",
+            subscription.name,
+            len(feed_external_ids),
+            len(feed_external_ids) - len(cache_misses),
+            len(cache_misses),
+            len(es_existing),
+        )
+    else:
+        es_existing = set()
+        logger.debug(
+            "%s: all %d feed item(s) satisfied by local cache — ES query skipped",
+            subscription.name,
+            len(feed_external_ids),
+        )
+
+    existing_ids = cached_ids | es_existing
+    # -----------------------------------------------------------------------
+
     es = get_es_client()
     new_ids = []
+    new_external_ids: list[str] = []
 
-    for item_raw in items_raw:
-        doc = _parse_dlp_item(item_raw, subscription)
+    for doc in docs:
         if doc["external_id"] in existing_ids:
             continue
 
@@ -481,6 +563,7 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
         doc_id = str(uuid.uuid4())
         await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)
         new_ids.append(doc_id)
+        new_external_ids.append(doc["external_id"])
 
         # Build a single detailed log line summarizing all processing for this item
         actions = []
@@ -507,6 +590,12 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                 },
             )
             logger.info("Set playback to %.0fs to skip ad for %s", ad_skip_to, doc["title"])
+
+    # Persist newly indexed external_ids to the local cache
+    if new_external_ids:
+        cache = _load_dedupe_cache()
+        _cache_add_ids(cache, subscription.id, new_external_ids)
+        _save_dedupe_cache(cache)
 
     # Update last_polled_at
     await es.update(
