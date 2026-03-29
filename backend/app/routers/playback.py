@@ -8,17 +8,33 @@ from backend.app.services.elasticsearch import (
     PLAYBACK_STATE_INDEX,
     get_es_client,
 )
+from backend.app.services.playback_buffer import playback_buffer
 
 router = APIRouter(prefix="/api/playback", tags=["playback"])
 
 
 @router.get("/{content_item_id}/", response_model=PlaybackState | None)
 async def get_playback(content_item_id: str):
+    # Check in-memory buffer first for the most recent uncommitted state
+    buffered = playback_buffer.get(content_item_id)
+    if buffered:
+        return PlaybackState(**buffered)
+
     es = get_es_client()
+
+    # Try direct ID lookup (docs written by the buffer flush use content_item_id as _id)
+    try:
+        resp = await es.get(index=PLAYBACK_STATE_INDEX, id=content_item_id)
+        return PlaybackState(**resp["_source"])
+    except Exception:
+        pass
+
+    # Fall back to field search for legacy docs with auto-generated IDs
     resp = await es.search(
         index=PLAYBACK_STATE_INDEX,
         body={
             "query": {"term": {"content_item_id": content_item_id}},
+            "sort": [{"last_updated_at": {"order": "desc"}}],
             "size": 1,
         },
     )
@@ -61,15 +77,7 @@ async def update_playback(content_item_id: str, data: PlaybackUpdate):
         "last_updated_at": now.isoformat(),
     }
 
-    # Upsert by content_item_id
-    resp = await es.search(
-        index=PLAYBACK_STATE_INDEX,
-        body={"query": {"term": {"content_item_id": content_item_id}}, "size": 1},
-    )
-    hits = resp["hits"]["hits"]
-    if hits:
-        await es.update(index=PLAYBACK_STATE_INDEX, id=hits[0]["_id"], doc=doc)
-    else:
-        await es.index(index=PLAYBACK_STATE_INDEX, document=doc)
+    # Buffer the playback state — flushed to ES every 15 minutes and on shutdown
+    playback_buffer.update(content_item_id, doc)
 
     return PlaybackState(**doc)
