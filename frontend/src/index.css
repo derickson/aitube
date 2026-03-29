@@ -1057,10 +1057,14 @@ main:has(.flyout-open) {
 
 .flyout-scroll {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 1rem 1.25rem;
   display: flex;
   flex-direction: column;
+}
+
+.flyout-scroll.transcript-active {
+  overflow-y: auto;
 }
 
 .flyout-summary {

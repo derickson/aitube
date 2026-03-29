@@ -213,7 +213,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
         )}
       </div>
 
-      <div className={`flyout-scroll${activeTab === "chat" ? " chat-active" : ""}`}>
+      <div className={`flyout-scroll${activeTab === "transcript" ? " transcript-active" : ""}${activeTab === "chat" ? " chat-active" : ""}`}>
         <ContentTabs
           tabs={[
             { id: "summary", label: "Summary" },
