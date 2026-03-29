@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import settings
 from backend.app.routers import subscriptions, content, playback, polling, chat
 from backend.app.services.elasticsearch import close_es_client, ensure_indices
+from backend.app.services.playback_buffer import playback_buffer
 
 if settings.elastic_apm_server_url:
     from elasticapm.contrib.starlette import make_apm_client, ElasticAPM
@@ -25,7 +26,9 @@ async def lifespan(app: FastAPI):
         await ensure_indices()
     except Exception as e:
         logger.warning("Could not connect to Elasticsearch on startup: %s", e)
+    playback_buffer.start()
     yield
+    await playback_buffer.stop()
     await close_es_client()
 
 
