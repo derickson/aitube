@@ -19,7 +19,7 @@ def test_add_and_delete_adhoc_video(api: httpx.Client):
     """POST a YouTube video for processing, wait for it to appear, then delete it."""
 
     # Submit the video
-    resp = api.post("/api/watchlist/", json={"urls": [RICKROLL_URL]})
+    resp = api.post("/api/submit_video/", json={"urls": [RICKROLL_URL]})
     assert resp.status_code == 200
     body = resp.json()
 
@@ -55,10 +55,13 @@ def test_watchlist_returns_unwatched_videos(api: httpx.Client):
     assert isinstance(items, list)
     assert len(items) > 0, "Watchlist is empty — expected at least one unwatched video"
 
-    # Every item should be a video and not consumed
+    # Every item should be a video and not consumed, with no heavy fields
     for item in items:
         assert item["type"] == "video"
         assert item["consumed"] is False or "consumed" not in item
+        assert "summary" not in item
+        assert "transcript" not in item
+        assert "content_markdown" not in item
 
 
 # ---- helpers ----------------------------------------------------------------

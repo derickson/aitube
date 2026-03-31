@@ -215,7 +215,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/chat/agents/` | List available chat agents |
 | POST | `/api/chat/{item_id}/stream/` | Stream chat response for a content item |
 | GET | `/api/watchlist/` | Unwatched YouTube videos |
-| POST | `/api/watchlist/` | Submit YouTube URLs for background processing |
+| POST | `/api/submit_video/` | Submit YouTube URLs for background processing |
 
 ## Automation API
 
@@ -245,7 +245,6 @@ Response is a JSON array of content items:
     "url": "https://www.youtube.com/watch?v=...",
     "type": "video",
     "consumed": false,
-    "summary": "AI-generated summary...",
     "published_at": "2026-03-30T12:00:00Z",
     "duration_seconds": 612,
     "subscription_id": "sub_id_or_adhoc",
@@ -254,12 +253,14 @@ Response is a JSON array of content items:
 ]
 ```
 
+The response excludes `summary`, `transcript`, and `content_markdown` to keep payloads lightweight. Use `GET /api/content/{id}/` to fetch the full item.
+
 ### Submit ad-hoc YouTube videos
 
 Send an array of YouTube URLs for AITube to fetch, transcribe, and summarize in the background. These don't need to belong to any subscription. The endpoint returns immediately — processing happens asynchronously.
 
 ```bash
-curl -X POST http://localhost:3103/api/watchlist/ \
+curl -X POST http://localhost:3103/api/submit_video/ \
   -H "Content-Type: application/json" \
   -d '{"urls": ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]}'
 ```

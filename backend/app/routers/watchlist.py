@@ -2,15 +2,38 @@ import asyncio
 import logging
 import re
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from backend.app.models.content import ContentItem
+from backend.app.models.content import ContentType
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
+router = APIRouter(prefix="/api", tags=["watchlist"])
+
+
+class WatchlistItem(BaseModel):
+    id: str
+    subscription_id: str
+    external_id: str
+    type: ContentType
+    title: str
+    url: str
+    published_at: datetime | None = None
+    discovered_at: datetime
+    duration_seconds: float | None = None
+    thumbnail_url: str | None = ""
+    interest_score: float | None = None
+    interest_reasoning: str | None = ""
+    consumed: bool = False
+    user_interest: str | None = None
+    content_dlp_cache_id: str = ""
+    metadata: dict = {}
+
+
+_WATCHLIST_EXCLUDES = ["summary", "transcript", "content_markdown", "metadata.description"]
 
 # Track background tasks to prevent GC
 _background_tasks: set[asyncio.Task] = set()
@@ -25,7 +48,7 @@ def _extract_video_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-@router.get("/", response_model=list[ContentItem])
+@router.get("/watchlist/", response_model=list[WatchlistItem])
 async def get_watchlist(
     size: int = Query(default=50, le=200),
     offset: int = 0,
@@ -46,13 +69,14 @@ async def get_watchlist(
                     ]
                 }
             },
+            "_source": {"excludes": _WATCHLIST_EXCLUDES},
             "size": size,
             "from": offset,
             "sort": [{"published_at": {"order": "desc", "missing": "_last"}}],
         },
     )
     return [
-        ContentItem(id=hit["_id"], **hit["_source"])
+        WatchlistItem(id=hit["_id"], **hit["_source"])
         for hit in resp["hits"]["hits"]
     ]
 
@@ -67,7 +91,7 @@ class AddVideosResponse(BaseModel):
     errors: list[str]
 
 
-@router.post("/", response_model=AddVideosResponse)
+@router.post("/submit_video/", response_model=AddVideosResponse, tags=["watchlist"])
 async def add_videos(request: AddVideosRequest):
     """Accept YouTube URLs for background processing. Returns immediately."""
     es = get_es_client()
