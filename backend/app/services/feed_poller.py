@@ -119,6 +119,114 @@ def _parse_dlp_item(
     }
 
 
+def build_adhoc_youtube_doc(video_id: str, url: str) -> dict[str, Any]:
+    """Create an initial ES document for an ad-hoc YouTube video (no subscription)."""
+    return {
+        "subscription_id": "adhoc",
+        "external_id": f"yt_{video_id}",
+        "type": "video",
+        "title": "",
+        "url": url,
+        "published_at": None,
+        "discovered_at": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": None,
+        "thumbnail_url": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+        "summary": "",
+        "interest_score": None,
+        "interest_reasoning": "",
+        "transcript": None,
+        "content_markdown": "",
+        "content_dlp_cache_id": "",
+        "metadata": {"description": "", "author": None, "tags": [], "extras": {}},
+    }
+
+
+async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | None:
+    """Enrich a YouTube video document with metadata, transcript, and summary.
+
+    Returns the enriched doc, or None if the video should be skipped (e.g. livestream).
+    """
+    from backend.app.services.youtube_captions import fetch_video_metadata
+
+    url = doc.get("url", "")
+    if not url:
+        return doc
+
+    # Fetch metadata via yt-dlp
+    try:
+        meta = fetch_video_metadata(url)
+        if meta and meta["is_live"]:
+            logger.info("Skipping livestream: %s", doc.get("title") or url)
+            return None
+        if meta:
+            if meta.get("duration"):
+                doc["duration_seconds"] = meta["duration"]
+            if meta.get("captions"):
+                doc["transcript"] = meta["captions"]
+            # Populate empty fields from yt-dlp metadata (for ad-hoc videos)
+            if not doc.get("title") and meta.get("title"):
+                doc["title"] = meta["title"]
+            if not doc.get("metadata", {}).get("author") and meta.get("uploader"):
+                doc.setdefault("metadata", {})["author"] = meta["uploader"]
+            if not doc.get("metadata", {}).get("description") and meta.get("description"):
+                doc.setdefault("metadata", {})["description"] = meta["description"]
+            if not doc.get("published_at") and meta.get("upload_date"):
+                # upload_date is "YYYYMMDD" format
+                try:
+                    dt = datetime.strptime(meta["upload_date"], "%Y%m%d").replace(tzinfo=timezone.utc)
+                    doc["published_at"] = dt.isoformat()
+                except ValueError:
+                    pass
+    except Exception as e:
+        logger.warning("Failed to fetch metadata for %s: %s", url, e)
+
+    # Fallback to content-dlp transcription if no captions
+    if not doc.get("transcript") and url:
+        try:
+            logger.info("No captions available, falling back to content-dlp transcription for %s", url)
+            yt_data = await content_dlp.fetch_youtube(url, no_audio=False, transcript=True)
+            if yt_data.get("transcript"):
+                t = yt_data["transcript"]
+                doc["transcript"] = t if isinstance(t, dict) else {"text": t, "chunks": []}
+        except Exception as e:
+            logger.warning("content-dlp transcription also failed for %s: %s", url, e)
+
+    # Derive duration from transcript chunks if still missing
+    if not doc.get("duration_seconds"):
+        t = doc.get("transcript")
+        if isinstance(t, dict) and t.get("chunks"):
+            last_end = t["chunks"][-1].get("end", 0)
+            if last_end > 0:
+                doc["duration_seconds"] = last_end
+
+    # Generate AI summary
+    transcript_obj = doc.get("transcript")
+    transcript_text = ""
+    transcript_chunks = None
+    if isinstance(transcript_obj, dict):
+        transcript_text = transcript_obj.get("text", "")
+        if transcript_obj.get("chunks"):
+            transcript_chunks = transcript_obj["chunks"]
+    source_text = transcript_text or doc.get("content_markdown", "")
+    if source_text or doc.get("metadata", {}).get("description"):
+        try:
+            from backend.app.services.summarizer import summarize_content
+            summary = await summarize_content(
+                title=doc["title"],
+                content_type=doc["type"],
+                transcript_text=source_text,
+                description=doc.get("metadata", {}).get("description", ""),
+                author=doc.get("metadata", {}).get("author", ""),
+                transcript_chunks=transcript_chunks,
+            )
+            if summary:
+                doc["summary"] = summary
+        except Exception as e:
+            logger.warning("Failed to summarize %s: %s", doc.get("title", url), e)
+
+    return doc
+
+
 def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any] | None:
     """Convert a YouTube Atom feed <entry> into a content-dlp-like dict.
     Returns None if the entry is a YouTube Short."""
@@ -479,40 +587,12 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                 except Exception as e:
                     logger.warning("Failed to clean up article %s: %s", doc["title"], e)
 
-        # For YouTube videos, fetch metadata via yt-dlp to check for livestreams and get captions
+        # For YouTube videos, process metadata, transcript, and summary
         if subscription.type == SubscriptionType.youtube_channel and doc["url"]:
-            from backend.app.services.youtube_captions import fetch_video_metadata
-            try:
-                meta = fetch_video_metadata(doc["url"])
-                if meta and meta["is_live"]:
-                    logger.info("Skipping livestream: %s", doc["title"])
-                    continue
-                if meta and meta.get("duration"):
-                    doc["duration_seconds"] = meta["duration"]
-                if meta and meta["captions"]:
-                    doc["transcript"] = meta["captions"]
-            except Exception as e:
-                logger.warning("Failed to fetch metadata for %s: %s", doc["url"], e)
-
-        if subscription.type == SubscriptionType.youtube_channel:
-            transcript = doc.get("transcript")
-            if not transcript and doc["url"]:
-                try:
-                    logger.info("No captions available, falling back to content-dlp transcription for %s", doc["url"])
-                    yt_data = await content_dlp.fetch_youtube(doc["url"], no_audio=False, transcript=True)
-                    if yt_data.get("transcript"):
-                        t = yt_data["transcript"]
-                        doc["transcript"] = t if isinstance(t, dict) else {"text": t, "chunks": []}
-                except Exception as e:
-                    logger.warning("content-dlp transcription also failed for %s: %s", doc["url"], e)
-
-            # Fallback: derive duration from transcript chunks if still missing
-            if not doc.get("duration_seconds"):
-                t = doc.get("transcript")
-                if isinstance(t, dict) and t.get("chunks"):
-                    last_end = t["chunks"][-1].get("end", 0)
-                    if last_end > 0:
-                        doc["duration_seconds"] = last_end
+            result = await process_youtube_video_doc(doc)
+            if result is None:
+                continue
+            doc = result
 
         # For podcast episodes, download audio and transcribe
         ad_skip_to: float | None = None
@@ -534,31 +614,31 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             except Exception as e:
                 logger.warning("Failed to transcribe podcast %s: %s", doc["title"], e)
 
-        # Generate AI summary
-        transcript_obj = doc.get("transcript")
-        transcript_text = ""
-        transcript_chunks = None
-        if isinstance(transcript_obj, dict):
-            transcript_text = transcript_obj.get("text", "")
-            if transcript_obj.get("chunks"):
-                transcript_chunks = transcript_obj["chunks"]
-        # For articles, use the markdown content instead of transcript
-        source_text = transcript_text or doc.get("content_markdown", "")
-        if source_text or doc.get("metadata", {}).get("description"):
-            try:
-                from backend.app.services.summarizer import summarize_content
-                summary = await summarize_content(
-                    title=doc["title"],
-                    content_type=doc["type"],
-                    transcript_text=source_text,
-                    description=doc.get("metadata", {}).get("description", ""),
-                    author=doc.get("metadata", {}).get("author", ""),
-                    transcript_chunks=transcript_chunks,
-                )
-                if summary:
-                    doc["summary"] = summary
-            except Exception as e:
-                logger.warning("Failed to summarize %s: %s", doc["title"], e)
+        # Generate AI summary for non-YouTube types (YouTube handled by process_youtube_video_doc)
+        if subscription.type != SubscriptionType.youtube_channel:
+            transcript_obj = doc.get("transcript")
+            transcript_text = ""
+            transcript_chunks = None
+            if isinstance(transcript_obj, dict):
+                transcript_text = transcript_obj.get("text", "")
+                if transcript_obj.get("chunks"):
+                    transcript_chunks = transcript_obj["chunks"]
+            source_text = transcript_text or doc.get("content_markdown", "")
+            if source_text or doc.get("metadata", {}).get("description"):
+                try:
+                    from backend.app.services.summarizer import summarize_content
+                    summary = await summarize_content(
+                        title=doc["title"],
+                        content_type=doc["type"],
+                        transcript_text=source_text,
+                        description=doc.get("metadata", {}).get("description", ""),
+                        author=doc.get("metadata", {}).get("author", ""),
+                        transcript_chunks=transcript_chunks,
+                    )
+                    if summary:
+                        doc["summary"] = summary
+                except Exception as e:
+                    logger.warning("Failed to summarize %s: %s", doc["title"], e)
 
         doc_id = str(uuid.uuid4())
         await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)

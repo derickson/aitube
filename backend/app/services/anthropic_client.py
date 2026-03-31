@@ -1,5 +1,7 @@
 """Instrumented Anthropic client wrappers for APM tracing."""
 
+from contextlib import asynccontextmanager
+
 import anthropic
 import elasticapm
 
@@ -34,3 +36,25 @@ def traced_messages_create(client: anthropic.Anthropic, **kwargs) -> anthropic.t
                 output_tokens=response.usage.output_tokens,
             )
         return response
+
+
+@asynccontextmanager
+async def traced_async_stream(client: anthropic.AsyncAnthropic, **kwargs):
+    """Async context manager wrapping client.messages.stream() with APM labels."""
+    model = kwargs.get("model", "unknown")
+
+    elasticapm.label(
+        model=model,
+        max_tokens=kwargs.get("max_tokens", 0),
+        streaming=True,
+    )
+
+    async with client.messages.stream(**kwargs) as stream:
+        yield stream
+
+    final_message = stream.get_final_message()
+    if final_message.usage:
+        elasticapm.label(
+            input_tokens=final_message.usage.input_tokens,
+            output_tokens=final_message.usage.output_tokens,
+        )

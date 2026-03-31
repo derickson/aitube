@@ -214,3 +214,70 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | POST | `/api/polling/trigger/{id}/` | Trigger feed poll (single subscription) |
 | GET | `/api/chat/agents/` | List available chat agents |
 | POST | `/api/chat/{item_id}/stream/` | Stream chat response for a content item |
+| GET | `/api/watchlist/` | Unwatched YouTube videos |
+| POST | `/api/watchlist/` | Submit YouTube URLs for background processing |
+
+## Automation API
+
+The watchlist endpoints are designed for external tools and scripts that want to interact with AITube programmatically.
+
+### Get unwatched YouTube videos
+
+Returns all YouTube videos that haven't been marked as watched, sorted by publish date (newest first).
+
+```bash
+curl http://localhost:3103/api/watchlist/
+```
+
+Supports pagination via `size` (default 50, max 200) and `offset` query parameters:
+
+```bash
+curl "http://localhost:3103/api/watchlist/?size=10&offset=0"
+```
+
+Response is a JSON array of content items:
+
+```json
+[
+  {
+    "id": "abc123",
+    "title": "Video Title",
+    "url": "https://www.youtube.com/watch?v=...",
+    "type": "video",
+    "consumed": false,
+    "summary": "AI-generated summary...",
+    "published_at": "2026-03-30T12:00:00Z",
+    "duration_seconds": 612,
+    "subscription_id": "sub_id_or_adhoc",
+    ...
+  }
+]
+```
+
+### Submit ad-hoc YouTube videos
+
+Send an array of YouTube URLs for AITube to fetch, transcribe, and summarize in the background. These don't need to belong to any subscription. The endpoint returns immediately — processing happens asynchronously.
+
+```bash
+curl -X POST http://localhost:3103/api/watchlist/ \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]}'
+```
+
+Response:
+
+```json
+{
+  "accepted": ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+  "skipped": [],
+  "errors": []
+}
+```
+
+- **accepted** — URLs that will be processed in the background
+- **skipped** — URLs for videos already in the system (deduped by video ID)
+- **errors** — URLs that couldn't be parsed as valid YouTube links
+
+Accepted URL formats: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/embed/`, `youtube.com/shorts/`
+
+Processing per video takes 1-3 minutes (caption fetch + AI summarization). Once complete, the video appears in the watchlist and content search. Ad-hoc videos are stored with `subscription_id: "adhoc"`.

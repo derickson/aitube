@@ -1,4 +1,4 @@
-.PHONY: init docker-stop docker-start docker-redeploy run dev stop
+.PHONY: init docker-stop docker-start docker-redeploy run dev stop test
 
 init:
 	cd frontend && npm install
@@ -31,3 +31,6 @@ stop:
 	@echo "Stopping local servers..."
 	-pkill -f "uvicorn backend.app.main:app"
 	-pkill -f "vite.*--port 8103"
+
+test:
+	uv run pytest -v

@@ -18,6 +18,12 @@ dependencies = [
     "elastic-apm>=6.22",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25",
+]
+
 [project.scripts]
 aitube-server = "backend.app.main:start"
 aitube-poll = "backend.scripts.poll_feeds:main"
@@ -29,6 +35,9 @@ python-preference = "system"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend"]
