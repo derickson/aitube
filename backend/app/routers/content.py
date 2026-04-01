@@ -325,3 +325,26 @@ async def delete_content_item(item_id: str):
     es = get_es_client()
     await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)
     return {"deleted": item_id}
+
+
+@router.delete("/by-external-id/{external_id}/")
+async def delete_by_external_id(external_id: str):
+    """Delete a content item by its external_id (e.g. yt_dQw4w9WgXcQ)."""
+    es = get_es_client()
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {"term": {"external_id": external_id}},
+            "_source": False,
+            "size": 1,
+        },
+    )
+    hits = resp["hits"]["hits"]
+    if not hits:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Content with external_id '{external_id}' not found",
+        )
+    item_id = hits[0]["_id"]
+    await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)
+    return {"status": "deleted", "external_id": external_id, "id": item_id}

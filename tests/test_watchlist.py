@@ -29,20 +29,17 @@ def test_add_and_delete_adhoc_video(api: httpx.Client):
 
     # If it was accepted, poll until it appears in ES (background processing)
     if RICKROLL_URL in body["accepted"]:
-        item_id = _wait_for_video(api, RICKROLL_EXTERNAL_ID, timeout=180)
-    else:
-        # Already existed — look it up directly
-        item_id = _find_video(api, RICKROLL_EXTERNAL_ID)
+        _wait_for_video(api, RICKROLL_EXTERNAL_ID, timeout=180)
 
-    assert item_id is not None, f"Video {RICKROLL_EXTERNAL_ID} never appeared in ES"
-
-    # Delete the video
-    resp = api.delete(f"/api/content/{item_id}/")
+    # Delete by external_id
+    resp = api.delete(f"/api/content/by-external-id/{RICKROLL_EXTERNAL_ID}/")
     assert resp.status_code == 200
-    assert resp.json()["deleted"] == item_id
+    result = resp.json()
+    assert result["status"] == "deleted"
+    assert result["external_id"] == RICKROLL_EXTERNAL_ID
 
     # Confirm it's gone
-    resp = api.get(f"/api/content/{item_id}/")
+    resp = api.delete(f"/api/content/by-external-id/{RICKROLL_EXTERNAL_ID}/")
     assert resp.status_code == 404
 
 

@@ -207,6 +207,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | PUT | `/api/content/{id}/interest/` | Set interest (up/down/none) |
 | POST | `/api/content/{id}/transcribe/` | Trigger transcription for a content item |
 | DELETE | `/api/content/{id}/` | Delete content item |
+| DELETE | `/api/content/by-external-id/{external_id}/` | Delete content item by external_id |
 | POST | `/api/content/playback-progress/` | Batch get playback progress |
 | GET | `/api/playback/{id}/` | Get playback position |
 | PUT | `/api/playback/{id}/` | Update playback position |
