@@ -34,6 +34,7 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
   - `content_dlp.py` — HTTP client to content-dlp service on host (port 7055), not subprocess calls
   - `youtube_captions.py` — yt-dlp for captions + livestream detection (via `is_live`/`was_live`)
   - `summarizer.py` — Claude Sonnet for content summaries with bullet-point breakdowns and timestamps
+  - `metadata_extractor.py` — Claude Haiku for extracting podcast titles from transcripts and article metadata from scraped markdown
   - `elasticsearch.py` — Async ES client with index mappings and lifecycle
 - **Config** (`backend/app/config.py`): Pydantic Settings reading from `.env`. Key: `content_dlp_url` defaults to localhost:7055, overridden to `host.docker.internal:7055` in Docker via `docker-compose.yml` environment block.
 
@@ -41,6 +42,7 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
 
 - `Timeline.tsx` — Main view with facet sidebar (type, status, interest, source subscription) and content card grid
 - `ContentView.tsx` — Flyout panel with YouTube/audio players, article reader, transcript viewer with auto-scroll
+- `AddContent.tsx` — Ad-hoc content submission with URL preview and confirm flow (YouTube, podcast MP3, article)
 - `api/client.ts` — Typed fetch wrapper for all API calls
 
 Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev mode.
@@ -52,6 +54,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 3. Per new item: scrape content (RSS) or fetch captions (YouTube) → cleanup markdown → generate AI summary → index to ES
 4. Post-poll: deduplicate content items by URL, backfill missing transcripts (up to 5/cycle)
 5. Frontend fetches from content search API with server-side filtering and faceted aggregations
+6. Ad-hoc content: user pastes URL in Add Content page → backend detects type → preview metadata → confirm triggers background pipeline (same as polling but for individual items)
 
 ### Key Design Decisions
 

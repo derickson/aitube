@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.config import settings
-from backend.app.routers import subscriptions, content, playback, polling, chat, watchlist
+from backend.app.routers import subscriptions, content, playback, polling, chat, watchlist, add_content
 from backend.app.services.elasticsearch import close_es_client, ensure_indices
 from backend.app.services.playback_buffer import playback_buffer
 
@@ -62,6 +62,7 @@ app.include_router(playback.router)
 app.include_router(polling.router)
 app.include_router(chat.router)
 app.include_router(watchlist.router)
+app.include_router(add_content.router)
 
 
 @app.get("/health/")

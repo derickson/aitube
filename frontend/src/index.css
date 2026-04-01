@@ -689,6 +689,67 @@ main:has(.flyout-open) {
   gap: 0.5rem;
 }
 
+/* Add Content */
+
+.add-content {
+  max-width: 720px;
+}
+
+.add-content h2 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+}
+
+.add-content-success {
+  background: var(--card-bg);
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.add-content-success .success-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.add-content-success p {
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.preview-meta-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.preview-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.preview-note {
+  font-size: 0.85rem;
+  color: var(--warning);
+  font-style: italic;
+}
+
 /* Timeline */
 
 .timeline-header {

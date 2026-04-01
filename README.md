@@ -112,7 +112,9 @@ Optional. Set `ELASTIC_APM_SERVER_URL` to enable backend tracing (services: `ait
 
 **Note:** Frontend APM vars (`VITE_*`) are baked in at Docker build time. Rebuild the frontend container after changing them.
 
-## Adding Subscriptions
+## Adding Content
+
+### Subscriptions (ongoing feeds)
 
 Paste any URL into the subscription manager — the system auto-detects the type and resolves metadata:
 
@@ -121,6 +123,16 @@ Paste any URL into the subscription manager — the system auto-detects the type
 - **RSS/Atom:** direct feed URLs or any website (auto-discovers `<link rel="alternate">` feeds, probes common feed paths relative to the URL and domain root)
 
 The resolver fetches the feed name, thumbnail, description, and sample items for preview before subscribing. A warning is shown if no feed is discovered. YouTube Shorts are automatically filtered out.
+
+### Individual items (Add Content page)
+
+Use the **Add Content** page in the nav bar to add individual items without creating a subscription:
+
+- **YouTube videos** — paste any video URL. Preview shows title, thumbnail, duration, and channel name.
+- **Podcast episodes** — paste an MP3/audio URL. Title is automatically extracted from the transcript using AI after processing.
+- **Web articles** — paste any article URL. The page is scraped via Jina Reader during preview, showing the extracted title and thumbnail.
+
+Content type is auto-detected from the URL. A preview card shows available metadata before you confirm. Processing (transcription, summarization) happens in the background after confirmation. All ad-hoc items appear in the timeline with `subscription_id: "adhoc"`.
 
 ## Content Pipeline
 
@@ -144,6 +156,7 @@ When new content is discovered during polling:
 - **Ad skip** for podcasts — Claude detects sponsor reads and sets playback past them
 - **Smart URL resolution** for YouTube channels, Apple Podcasts, Spotify, and RSS discovery
 - **Light/dark theme** toggle
+- **Ad-hoc content** — add any YouTube video, podcast MP3, or web article directly via the Add Content page with metadata preview before processing
 - **Subscription management** with per-feed interest notes, type-colored cards, search, and filters
 
 ## Project Structure
@@ -159,6 +172,7 @@ backend/
       playback.py        # Position tracking
       polling.py         # Feed poll triggers
       chat.py            # Streaming content Q&A with agents
+      add_content.py   # Add Content preview + confirm (YouTube, podcast, article)
     services/
       elasticsearch.py   # ES client, index mappings, lifecycle
       content_dlp.py     # HTTP client for content-dlp service on host
@@ -167,6 +181,7 @@ backend/
       youtube_captions.py # yt-dlp caption fetching
       ad_detector.py     # Claude-powered podcast ad detection
       summarizer.py      # Claude-powered content summaries
+      metadata_extractor.py # LLM-powered metadata extraction for ad-hoc content
       content_cleanup.py # Two-stage article cleanup (regex + LLM)
       agents.py          # Agent registry for content chat
     models/              # Pydantic schemas
@@ -182,6 +197,7 @@ frontend/
       ContentTabs.tsx        # Tab switcher for content view panels
       ChatPanel.tsx          # Streaming chat for content Q&A
       SubscriptionManager.tsx # Subscription CRUD with URL resolver
+      AddContent.tsx         # Ad-hoc content submission with preview
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
     theme/               # Light/dark theme
@@ -217,6 +233,8 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | POST | `/api/chat/{item_id}/stream/` | Stream chat response for a content item |
 | GET | `/api/watchlist/` | Unwatched YouTube videos |
 | POST | `/api/submit_video/` | Submit YouTube URLs for background processing |
+| POST | `/api/add-content/preview/` | Preview metadata for any URL (YouTube, podcast MP3, article) |
+| POST | `/api/add-content/confirm/` | Confirm and process previewed content in background |
 
 ## Automation API
 
@@ -303,3 +321,60 @@ Response:
 ```
 
 Returns 404 if no content item with that external ID exists.
+
+### Add ad-hoc content (any type)
+
+The Add Content API supports YouTube videos, podcast MP3s, and web articles via a two-step preview-then-confirm flow.
+
+**Step 1: Preview** — Detect content type and fetch metadata:
+
+```bash
+# YouTube video
+curl -X POST http://localhost:3103/api/add-content/preview/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+
+# Podcast MP3
+curl -X POST http://localhost:3103/api/add-content/preview/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/episode.mp3"}'
+
+# Web article
+curl -X POST http://localhost:3103/api/add-content/preview/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/article"}'
+```
+
+Response includes a `preview_id` and detected metadata:
+
+```json
+{
+  "preview_id": "uuid",
+  "url": "https://...",
+  "detected_type": "video",
+  "title": "Video Title",
+  "thumbnail_url": "https://...",
+  "duration_seconds": 212,
+  "published_at": "2026-03-30T00:00:00+00:00",
+  "description": "...",
+  "author": "Channel Name",
+  "file_size_bytes": null
+}
+```
+
+Type detection: YouTube URLs are detected by regex, audio files (`.mp3`, `.m4a`, etc.) become podcast episodes, everything else is treated as an article. For articles, Jina Reader scrapes the page during preview to extract title and thumbnail.
+
+**Step 2: Confirm** — Submit for background processing:
+
+```bash
+curl -X POST http://localhost:3103/api/add-content/confirm/ \
+  -H "Content-Type: application/json" \
+  -d '{"preview_id": "uuid-from-step-1", "title_override": "Optional custom title"}'
+```
+
+Returns `{"status": "accepted"}` immediately. Processing happens in the background:
+- **YouTube:** captions + AI summary (1-3 min)
+- **Podcast:** audio transcription + LLM title extraction + AI summary (3-10 min depending on length)
+- **Article:** markdown cleanup + LLM metadata extraction + AI summary (30-60 sec)
+
+All ad-hoc content uses `subscription_id: "adhoc"`. Preview data expires after 30 minutes. Returns 409 if the content already exists.

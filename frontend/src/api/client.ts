@@ -233,3 +233,35 @@ export function chatStreamUrl(itemId: string): string {
 export function triggerPoll(): Promise<{ status: string; message?: string }> {
   return apiFetch("/polling/trigger/", { method: "POST" });
 }
+
+// --- Add Content ---
+
+export interface ContentPreviewResponse {
+  preview_id: string;
+  url: string;
+  detected_type: ContentType;
+  title: string | null;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  published_at: string | null;
+  description: string | null;
+  author: string | null;
+  file_size_bytes: number | null;
+}
+
+export function previewContent(url: string): Promise<ContentPreviewResponse> {
+  return apiFetch("/add-content/preview/", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
+export function confirmContent(
+  previewId: string,
+  titleOverride?: string,
+): Promise<{ status: string }> {
+  return apiFetch("/add-content/confirm/", {
+    method: "POST",
+    body: JSON.stringify({ preview_id: previewId, title_override: titleOverride || null }),
+  });
+}
