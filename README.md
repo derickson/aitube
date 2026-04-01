@@ -283,3 +283,23 @@ Response:
 Accepted URL formats: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/embed/`, `youtube.com/shorts/`
 
 Processing per video takes 1-3 minutes (caption fetch + AI summarization). Once complete, the video appears in the watchlist and content search. Ad-hoc videos are stored with `subscription_id: "adhoc"`.
+
+### Delete a video by external ID
+
+Delete a content item directly using its external ID, without needing to look up the internal document ID first. YouTube videos use the format `yt_{video_id}`.
+
+```bash
+curl -X DELETE http://localhost:3103/api/content/by-external-id/yt_dQw4w9WgXcQ/
+```
+
+Response:
+
+```json
+{
+  "status": "deleted",
+  "external_id": "yt_dQw4w9WgXcQ",
+  "id": "abc123-internal-doc-id"
+}
+```
+
+Returns 404 if no content item with that external ID exists.
