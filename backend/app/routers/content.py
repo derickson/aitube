@@ -3,7 +3,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from backend.app.models.content import ContentItem
+from backend.app.models.content import ContentItem, ContentItemSummary
+from backend.app.services import content_cache
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -19,7 +20,7 @@ class FacetBucket(BaseModel):
 
 
 class ContentSearchResponse(BaseModel):
-    items: list[ContentItem]
+    items: list[ContentItemSummary]
     total: int
     facets: dict[str, list[FacetBucket]]
 
@@ -34,6 +35,15 @@ async def list_content(
     size: int = Query(default=50, le=200),
     offset: int = 0,
 ):
+    cache_params = {
+        "subscription_id": subscription_id, "content_type": content_type,
+        "consumed": consumed, "interest": interest, "q": q,
+        "size": size, "offset": offset,
+    }
+    cached = content_cache.get(cache_params)
+    if cached is not None:
+        return cached
+
     es = get_es_client()
     must: list[dict[str, Any]] = []
     filter_clauses: list[dict[str, Any]] = []
@@ -86,6 +96,14 @@ async def list_content(
         "size": size,
         "from": offset,
         "sort": [{"published_at": {"order": "desc", "missing": "_last"}}],
+        "_source": {
+            "includes": [
+                "subscription_id", "external_id", "type", "title", "url",
+                "published_at", "discovered_at", "duration_seconds",
+                "thumbnail_url", "summary", "interest_score",
+                "user_interest", "consumed", "viewed",
+            ]
+        },
         "aggs": {
             "type": {"terms": {"field": "type", "size": 10}},
             "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
@@ -97,9 +115,9 @@ async def list_content(
     search_resp = await es.search(index=CONTENT_ITEMS_INDEX, body=search_body)
 
     hits = search_resp["hits"]["hits"]
-    items: list[ContentItem] = []
+    items: list[ContentItemSummary] = []
     for hit in hits:
-        items.append(ContentItem(id=hit["_id"], **hit["_source"]))
+        items.append(ContentItemSummary(id=hit["_id"], **hit["_source"]))
 
     total_hits = search_resp["hits"]["total"]
     total = total_hits["value"] if isinstance(total_hits, dict) else total_hits
@@ -126,7 +144,9 @@ async def list_content(
                 for bucket in agg_data.get("buckets", [])
             ]
 
-    return ContentSearchResponse(items=items, total=total, facets=facets)
+    response = ContentSearchResponse(items=items, total=total, facets=facets)
+    content_cache.put(cache_params, response)
+    return response
 
 
 @router.get("/{item_id}/", response_model=ContentItem)
@@ -190,6 +210,7 @@ async def transcribe_content_item(item_id: str):
         doc={"transcript": transcript},
     )
 
+    content_cache.invalidate()
     return {"status": "ok", "transcript_length": len(transcript.get("text", ""))}
 
 
@@ -197,6 +218,7 @@ async def transcribe_content_item(item_id: str):
 async def set_consumed(item_id: str, consumed: bool = True):
     es = get_es_client()
     await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"consumed": consumed})
+    content_cache.invalidate()
     return {"id": item_id, "consumed": consumed}
 
 
@@ -204,6 +226,7 @@ async def set_consumed(item_id: str, consumed: bool = True):
 async def set_viewed(item_id: str):
     es = get_es_client()
     await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"viewed": True})
+    content_cache.invalidate()
     return {"id": item_id, "viewed": True}
 
 
@@ -220,6 +243,7 @@ async def set_interest(item_id: str, interest: str = "up"):
         )
     else:
         await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"user_interest": interest})
+    content_cache.invalidate()
     return {"id": item_id, "interest": interest if interest != "none" else None}
 
 
@@ -331,6 +355,7 @@ async def export_csv():
 async def delete_content_item(item_id: str):
     es = get_es_client()
     await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)
+    content_cache.invalidate()
     return {"deleted": item_id}
 
 
@@ -354,4 +379,5 @@ async def delete_by_external_id(external_id: str):
         )
     item_id = hits[0]["_id"]
     await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)
+    content_cache.invalidate()
     return {"status": "deleted", "external_id": external_id, "id": item_id}

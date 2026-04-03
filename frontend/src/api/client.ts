@@ -44,7 +44,7 @@ export interface Transcript {
   chunks: TranscriptChunk[];
 }
 
-export interface ContentItem {
+export interface ContentItemSummary {
   id: string;
   subscription_id: string;
   external_id: string;
@@ -57,11 +57,14 @@ export interface ContentItem {
   thumbnail_url: string;
   summary: string;
   interest_score: number | null;
-  interest_reasoning: string;
-  transcript: Transcript | null;
+  user_interest: "up" | "down" | null;
   consumed: boolean;
   viewed: boolean;
-  user_interest: "up" | "down" | null;
+}
+
+export interface ContentItem extends ContentItemSummary {
+  interest_reasoning: string;
+  transcript: Transcript | null;
   content_markdown: string;
   metadata: Record<string, unknown>;
 }
@@ -140,7 +143,7 @@ export interface FacetBucket {
 }
 
 export interface ContentSearchResponse {
-  items: ContentItem[];
+  items: ContentItemSummary[];
   total: number;
   facets: Record<string, FacetBucket[]>;
 }

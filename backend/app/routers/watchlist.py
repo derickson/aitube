@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from backend.app.models.content import ContentType
+from backend.app.services import content_cache
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
 
 logger = logging.getLogger(__name__)
@@ -164,5 +165,6 @@ async def _process_adhoc_videos(urls: list[str]) -> None:
                 index=CONTENT_ITEMS_INDEX, id=doc_id, document=enriched
             )
             logger.info("Indexed ad-hoc video '%s' as %s", enriched.get("title", url), doc_id)
+            content_cache.invalidate()
         except Exception:
             logger.exception("Failed to process ad-hoc video: %s", url)

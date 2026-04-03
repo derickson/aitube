@@ -22,6 +22,25 @@ class Transcript(BaseModel):
     chunks: list[TranscriptChunk] = []
 
 
+class ContentItemSummary(BaseModel):
+    """Lightweight model for list/search results (excludes transcript, content_markdown, metadata)."""
+    id: str
+    subscription_id: str
+    external_id: str
+    type: ContentType
+    title: str
+    url: str
+    published_at: Optional[datetime] = None
+    discovered_at: datetime
+    duration_seconds: Optional[float] = None
+    thumbnail_url: Optional[str] = ""
+    summary: Optional[str] = ""
+    interest_score: Optional[float] = None
+    user_interest: Optional[str] = None
+    consumed: bool = False
+    viewed: bool = False
+
+
 class ContentItem(BaseModel):
     id: str
     subscription_id: str

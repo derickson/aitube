@@ -5,7 +5,7 @@ import {
   batchPlaybackProgress,
   setInterest as apiSetInterest,
   setConsumed as apiSetConsumed,
-  type ContentItem,
+  type ContentItemSummary,
   type ContentType,
   type ContentSearchResponse,
   type FacetBucket,
@@ -337,7 +337,7 @@ function ContentCard({
   onInterest,
   onToggleConsumed,
 }: {
-  item: ContentItem;
+  item: ContentItemSummary;
   subName: string;
   isActive: boolean;
   isConsumed: boolean;
@@ -346,10 +346,7 @@ function ContentCard({
   onInterest: (itemId: string, value: "up" | "down" | "none") => void;
   onToggleConsumed: (itemId: string, consumed: boolean, callApi: boolean) => void;
 }) {
-  const description =
-    item.summary ||
-    (item.metadata as Record<string, unknown>)?.description?.toString() ||
-    "";
+  const description = item.summary || "";
 
   const classes = [
     "content-card",

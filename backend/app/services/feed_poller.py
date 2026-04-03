@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from backend.app.models.subscription import Subscription, SubscriptionType
-from backend.app.services import content_dlp
+from backend.app.services import content_cache, content_dlp
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -1011,4 +1011,5 @@ async def poll_all_active() -> dict[str, list[str]]:
     # Generate summaries for recent items that are missing them
     await backfill_missing_summaries()
 
+    content_cache.invalidate()
     return results

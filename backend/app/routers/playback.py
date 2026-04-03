@@ -8,6 +8,7 @@ from backend.app.services.elasticsearch import (
     PLAYBACK_STATE_INDEX,
     get_es_client,
 )
+from backend.app.services import content_cache
 from backend.app.services.playback_buffer import playback_buffer
 
 router = APIRouter(prefix="/api/playback", tags=["playback"])
@@ -67,6 +68,7 @@ async def update_playback(content_item_id: str, data: PlaybackUpdate):
         prev_consumed = item_resp["_source"].get("consumed", False)
         if consumed and not prev_consumed:
             await es.update(index=CONTENT_ITEMS_INDEX, id=content_item_id, doc={"consumed": True})
+            content_cache.invalidate()
     except Exception:
         pass
 
