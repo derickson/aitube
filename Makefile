@@ -2,6 +2,9 @@
 
 init:
 	cd frontend && npm install
+	@mkdir -p ~/.venvs
+	@if [ ! -d ~/.venvs/aitube ]; then uv venv ~/.venvs/aitube; fi
+	@if [ ! -L .venv ]; then ln -s ~/.venvs/aitube .venv; fi
 	uv sync
 
 docker-stop:
