@@ -273,3 +273,13 @@ export function confirmContent(
     body: JSON.stringify({ preview_id: previewId, title_override: titleOverride || null }),
   });
 }
+
+export function ingestContent(
+  url: string,
+  title?: string,
+): Promise<{ status: string; url: string; type: ContentType }> {
+  return apiFetch("/add-content/ingest/", {
+    method: "POST",
+    body: JSON.stringify({ url, title: title || null }),
+  });
+}

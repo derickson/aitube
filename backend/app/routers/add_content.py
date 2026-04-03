@@ -60,6 +60,11 @@ class ConfirmRequest(BaseModel):
     title_override: str | None = None
 
 
+class IngestRequest(BaseModel):
+    url: str
+    title: str | None = None
+
+
 # --- Helpers ---
 
 
@@ -224,8 +229,9 @@ async def _preview_article(url: str, preview_id: str, preview_data: dict) -> Con
     markdown = scraped.get("markdown", "")
     preview_data["scraped_markdown"] = markdown
     preview_data["content_dlp_cache_id"] = scraped.get("content_id", "")
+    preview_data["scraped_title"] = scraped.get("title", "")
 
-    title = _extract_markdown_title(markdown)
+    title = scraped.get("title") or _extract_markdown_title(markdown)
     thumbnail = _extract_markdown_image(markdown)
 
     # Build a description snippet from the first non-heading paragraph
@@ -288,6 +294,45 @@ async def confirm_content(request: ConfirmRequest):
     task.add_done_callback(_background_tasks.discard)
 
     return {"status": "accepted"}
+
+
+@router.post("/ingest/")
+async def ingest_content(request: IngestRequest):
+    """Direct content ingest without preview — for automation scripts."""
+    url = request.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    detected_type = await _detect_type_with_head(url)
+
+    # Dedup check
+    es = get_es_client()
+    if detected_type == "video":
+        vid_match = _YT_VIDEO_ID_RE.search(url)
+        if vid_match:
+            external_id = f"yt_{vid_match.group(1)}"
+            resp = await es.search(
+                index=CONTENT_ITEMS_INDEX,
+                body={"query": {"term": {"external_id": external_id}}, "_source": False, "size": 1},
+            )
+            if resp["hits"]["hits"]:
+                raise HTTPException(status_code=409, detail="This video already exists in your library")
+    else:
+        resp = await es.search(
+            index=CONTENT_ITEMS_INDEX,
+            body={"query": {"term": {"url": url}}, "_source": False, "size": 1},
+        )
+        if resp["hits"]["hits"]:
+            raise HTTPException(status_code=409, detail="This content already exists in your library")
+
+    # Fire background task with empty cached data (no preview step)
+    task = asyncio.create_task(
+        _process_content(url, detected_type, request.title, {})
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return {"status": "accepted", "url": url, "type": detected_type}
 
 
 async def _process_content(
@@ -431,8 +476,9 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
             logger.warning("Failed to scrape article %s: %s", url, e)
             return
 
-    # Get title from markdown heading
-    title = title_override or _extract_markdown_title(markdown)
+    # Get title from cached Jina response, markdown heading, or LLM extraction
+    scraped_title = cached.get("scraped_title", "")
+    title = title_override or scraped_title or _extract_markdown_title(markdown)
     thumbnail = _extract_markdown_image(markdown)
     published_at = None
 

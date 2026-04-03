@@ -64,5 +64,18 @@ async def download_and_transcribe(audio_url: str) -> dict[str, Any]:
 
 
 async def fetch_webscrape(url: str) -> dict[str, Any]:
-    """Scrape a web page and return markdown content."""
-    return await _post("webscrape", {"url": url})
+    """Scrape a web page and return markdown content via Jina Reader."""
+    jina_url = f"https://r.jina.ai/{url}"
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        resp = await client.get(
+            jina_url,
+            headers={"Accept": "application/json"},
+        )
+        resp.raise_for_status()
+    data = resp.json()
+    article_data = data.get("data", {})
+    return {
+        "markdown": article_data.get("content", ""),
+        "title": article_data.get("title", ""),
+        "content_id": "",
+    }
