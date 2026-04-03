@@ -150,7 +150,9 @@ When new content is discovered during polling:
 - **Flyout content viewer** with embedded YouTube player, HTML5 audio player, and distraction-free article reader
 - **Content chat** — ask questions about any content item with streaming AI responses; configurable agents with clickable timestamp citations for video/podcast seek
 - **Timestamped transcripts** with live playback highlighting and click-to-seek
+- **Viewed tracking** — marks content as viewed on first open, independent of playback completion
 - **Playback tracking** with resume from last position and 90% auto-complete
+- **Consumption report** API — JSON report of engagement signals (consumed, viewed, watch percentage, interest) with filters
 - **Interest voting** (up/down) per content item to mark what's interesting
 - **AI summaries** with bullet-point breakdowns and clickable timestamp links for video/podcast seek
 - **Ad skip** for podcasts — Claude detects sponsor reads and sets playback past them
@@ -168,7 +170,8 @@ backend/
     config.py            # Settings from .env
     routers/
       subscriptions.py   # CRUD + URL resolution
-      content.py         # Search, facets, CSV export, interest, consumed
+      content.py         # Search, facets, CSV export, interest, consumed, viewed
+      consumption_report.py # Engagement report endpoint
       playback.py        # Position tracking
       polling.py         # Feed poll triggers
       chat.py            # Streaming content Q&A with agents
@@ -220,6 +223,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/content/export/csv/` | Export all content as CSV |
 | GET | `/api/content/{id}/` | Get content item |
 | PUT | `/api/content/{id}/consumed/` | Set consumed status |
+| PUT | `/api/content/{id}/viewed/` | Mark content as viewed |
 | PUT | `/api/content/{id}/interest/` | Set interest (up/down/none) |
 | POST | `/api/content/{id}/transcribe/` | Trigger transcription for a content item |
 | DELETE | `/api/content/{id}/` | Delete content item |
@@ -233,6 +237,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | POST | `/api/chat/{item_id}/stream/` | Stream chat response for a content item |
 | GET | `/api/watchlist/` | Unwatched YouTube videos |
 | POST | `/api/submit_video/` | Submit YouTube URLs for background processing |
+| GET | `/api/consumption_report/` | Engagement report (consumed, viewed, watch %, interest) |
 | POST | `/api/add-content/preview/` | Preview metadata for any URL (YouTube, podcast MP3, article) |
 | POST | `/api/add-content/confirm/` | Confirm and process previewed content in background |
 
@@ -301,6 +306,47 @@ Response:
 Accepted URL formats: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/embed/`, `youtube.com/shorts/`
 
 Processing per video takes 1-3 minutes (caption fetch + AI summarization). Once complete, the video appears in the watchlist and content search. Ad-hoc videos are stored with `subscription_id: "adhoc"`.
+
+### Consumption report
+
+Returns engagement signals for recent content items, sorted by publish date (newest first). Joins content metadata with playback state to compute watch percentage.
+
+```bash
+# All content (default: 100 items)
+curl http://localhost:3103/api/consumption_report/
+
+# Filter by content type
+curl "http://localhost:3103/api/consumption_report/?content_type=video&size=10"
+
+# Filter by subscription
+curl "http://localhost:3103/api/consumption_report/?subscription_id=sub123"
+
+# Single content item
+curl "http://localhost:3103/api/consumption_report/?content_item_id=abc123"
+```
+
+Response:
+
+```json
+[
+  {
+    "subscription_id": "sub123",
+    "content_item_id": "abc123",
+    "content_type": "video",
+    "title": "Video Title",
+    "published_at": "2026-03-30T12:00:00Z",
+    "consumed": true,
+    "viewed": true,
+    "watch_percentage": 92.5,
+    "interest": "up"
+  }
+]
+```
+
+- **consumed** — `true` if 90%+ watched/listened, or manually marked
+- **viewed** — `true` if the user has opened the content in the UI
+- **watch_percentage** — playback position as percent of duration (`null` for articles or if no playback data)
+- **interest** — `"up"`, `"down"`, or `null`
 
 ### Delete a video by external ID
 

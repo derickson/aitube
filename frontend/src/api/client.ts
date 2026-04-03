@@ -60,6 +60,7 @@ export interface ContentItem {
   interest_reasoning: string;
   transcript: Transcript | null;
   consumed: boolean;
+  viewed: boolean;
   user_interest: "up" | "down" | null;
   content_markdown: string;
   metadata: Record<string, unknown>;
@@ -175,6 +176,10 @@ export function transcribeContentItem(id: string): Promise<{ status: string; tra
 
 export function setConsumed(id: string, consumed: boolean): Promise<{ id: string; consumed: boolean }> {
   return apiFetch(`/content/${id}/consumed/?consumed=${consumed}`, { method: "PUT" });
+}
+
+export function setViewed(id: string): Promise<{ id: string; viewed: boolean }> {
+  return apiFetch(`/content/${id}/viewed/`, { method: "PUT" });
 }
 
 export function setInterest(id: string, interest: "up" | "down" | "none"): Promise<{ id: string; interest: string | null }> {

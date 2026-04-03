@@ -58,6 +58,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "interest_reasoning": {"type": "text"},
                 "transcript": {"type": "object", "enabled": False},
                 "consumed": {"type": "boolean"},
+                "viewed": {"type": "boolean"},
                 "user_interest": {"type": "keyword"},
                 "content_markdown": {"type": "text"},
                 "content_dlp_cache_id": {"type": "keyword"},

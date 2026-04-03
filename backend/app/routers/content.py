@@ -200,6 +200,13 @@ async def set_consumed(item_id: str, consumed: bool = True):
     return {"id": item_id, "consumed": consumed}
 
 
+@router.put("/{item_id}/viewed/")
+async def set_viewed(item_id: str):
+    es = get_es_client()
+    await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"viewed": True})
+    return {"id": item_id, "viewed": True}
+
+
 @router.put("/{item_id}/interest/")
 async def set_interest(item_id: str, interest: str = "up"):
     """Set interest on a content item: 'up', 'down', or 'none' to clear."""

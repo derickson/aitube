@@ -7,6 +7,7 @@ import {
   getPlayback,
   updatePlayback,
   setConsumed as apiSetConsumed,
+  setViewed as apiSetViewed,
   type ContentItem,
   type PlaybackState,
 } from "../api/client";
@@ -112,6 +113,9 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
         setItem(contentData);
         setPlayback(playbackData);
         setConsumed(contentData.consumed ?? false);
+        if (!contentData.viewed) {
+          apiSetViewed(itemId).catch(() => {});
+        }
         setError("");
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"))

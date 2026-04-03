@@ -38,6 +38,7 @@ class ContentItem(BaseModel):
     interest_reasoning: Optional[str] = ""
     transcript: Optional[Transcript] = None
     consumed: bool = False
+    viewed: bool = False
     user_interest: Optional[str] = None  # "up", "down", or null
     content_markdown: str = ""
     content_dlp_cache_id: str = ""
