@@ -122,7 +122,7 @@ async def list_content(
                             "semantic": {"field": "semantic_body", "query": q}
                         })}},
                     ],
-                    "rank_window_size": 50,
+                    "rank_window_size": max(50, size + offset),
                     "rank_constant": 60,
                 }
             },
