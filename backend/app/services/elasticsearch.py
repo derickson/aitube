@@ -3,7 +3,9 @@ from elasticsearch import AsyncElasticsearch
 from backend.app.config import settings
 
 SUBSCRIPTIONS_INDEX = "aitube-subscriptions"
-CONTENT_ITEMS_INDEX = "aitube-content-items"
+CONTENT_ITEMS_INDEX = settings.content_items_index
+CONTENT_ITEMS_INDEX_V1 = "aitube-content-items"
+CONTENT_ITEMS_INDEX_V2 = settings.content_items_index_v2
 PLAYBACK_STATE_INDEX = "aitube-playback-state"
 
 _client: AsyncElasticsearch | None = None
@@ -41,7 +43,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
             }
         }
     },
-    CONTENT_ITEMS_INDEX: {
+    CONTENT_ITEMS_INDEX_V1: {
         "mappings": {
             "properties": {
                 "subscription_id": {"type": "keyword"},
@@ -63,6 +65,49 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "content_markdown": {"type": "text"},
                 "content_dlp_cache_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": False},
+            }
+        }
+    },
+    CONTENT_ITEMS_INDEX_V2: {
+        "mappings": {
+            "properties": {
+                "subscription_id": {"type": "keyword"},
+                "external_id": {"type": "keyword"},
+                "type": {"type": "keyword"},
+                "title": {
+                    "type": "text",
+                    "fields": {"keyword": {"type": "keyword"}},
+                    "copy_to": "semantic_headline",
+                },
+                "url": {"type": "keyword"},
+                "published_at": {"type": "date"},
+                "discovered_at": {"type": "date"},
+                "duration_seconds": {"type": "float"},
+                "thumbnail_url": {"type": "keyword", "index": False},
+                "summary": {"type": "text", "copy_to": "semantic_headline"},
+                "interest_score": {"type": "float"},
+                "interest_reasoning": {"type": "text"},
+                "transcript": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "text", "copy_to": "semantic_body"},
+                        "chunks": {"type": "object", "enabled": False},
+                    },
+                },
+                "consumed": {"type": "boolean"},
+                "viewed": {"type": "boolean"},
+                "user_interest": {"type": "keyword"},
+                "content_markdown": {"type": "text", "copy_to": "semantic_body"},
+                "content_dlp_cache_id": {"type": "keyword"},
+                "metadata": {"type": "object", "enabled": False},
+                "semantic_headline": {
+                    "type": "semantic_text",
+                    "inference_id": settings.semantic_inference_id,
+                },
+                "semantic_body": {
+                    "type": "semantic_text",
+                    "inference_id": settings.semantic_inference_id,
+                },
             }
         }
     },

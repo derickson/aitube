@@ -3,6 +3,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from backend.app.config import settings
 from backend.app.models.content import ContentItem, ContentItemSummary
 from backend.app.services import content_cache
 from backend.app.services.elasticsearch import (
@@ -32,13 +33,14 @@ async def list_content(
     consumed: str | None = None,  # "true", "false", or None for all
     interest: str | None = None,  # "up", "down", "none", or None for all
     q: str | None = None,
+    sort: str = "date",  # "date" or "relevance"
     size: int = Query(default=50, le=200),
     offset: int = 0,
 ):
     cache_params = {
         "subscription_id": subscription_id, "content_type": content_type,
         "consumed": consumed, "interest": interest, "q": q,
-        "size": size, "offset": offset,
+        "sort": sort, "size": size, "offset": offset,
     }
     cached = content_cache.get(cache_params)
     if cached is not None:
@@ -65,8 +67,9 @@ async def list_content(
         filter_clauses.append({"term": {"user_interest": "down"}})
     elif interest == "none":
         filter_clauses.append({"bool": {"must_not": {"exists": {"field": "user_interest"}}}})
+    lexical_match: dict[str, Any] | None = None
     if q:
-        must.append({
+        lexical_match = {
             "multi_match": {
                 "query": q,
                 "fields": [
@@ -78,39 +81,83 @@ async def list_content(
                 "type": "best_fields",
                 "fuzziness": "AUTO",
             }
-        })
+        }
+        must.append(lexical_match)
 
-    query: dict[str, Any]
-    if must or filter_clauses:
-        query = {"bool": {}}
-        if must:
-            query["bool"]["must"] = must
-        if filter_clauses:
-            query["bool"]["filter"] = filter_clauses
-    else:
-        query = {"match_all": {}}
+    use_semantic = bool(
+        q and sort == "relevance" and settings.enable_semantic_search
+    )
 
-    # Filtered search for results with aggregations
-    search_body: dict[str, Any] = {
-        "query": query,
-        "size": size,
-        "from": offset,
-        "sort": [{"published_at": {"order": "desc", "missing": "_last"}}],
-        "_source": {
-            "includes": [
-                "subscription_id", "external_id", "type", "title", "url",
-                "published_at", "discovered_at", "duration_seconds",
-                "thumbnail_url", "summary", "interest_score",
-                "user_interest", "consumed", "viewed",
-            ]
-        },
-        "aggs": {
-            "type": {"terms": {"field": "type", "size": 10}},
-            "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
-            "consumed": {"terms": {"field": "consumed", "missing": False}},
-            "interest": {"terms": {"field": "user_interest", "size": 10}},
-        },
+    common_source = {
+        "includes": [
+            "subscription_id", "external_id", "type", "title", "url",
+            "published_at", "discovered_at", "duration_seconds",
+            "thumbnail_url", "summary", "interest_score",
+            "user_interest", "consumed", "viewed",
+        ]
     }
+    common_aggs = {
+        "type": {"terms": {"field": "type", "size": 10}},
+        "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
+        "consumed": {"terms": {"field": "consumed", "missing": False}},
+        "interest": {"terms": {"field": "user_interest", "size": 10}},
+    }
+
+    search_body: dict[str, Any]
+    if use_semantic and lexical_match is not None:
+        def _wrap(inner: dict[str, Any]) -> dict[str, Any]:
+            if filter_clauses:
+                return {"bool": {"must": [inner], "filter": filter_clauses}}
+            return inner
+
+        search_body = {
+            "retriever": {
+                "rrf": {
+                    "retrievers": [
+                        {"standard": {"query": _wrap(lexical_match)}},
+                        {"standard": {"query": _wrap({
+                            "semantic": {"field": "semantic_headline", "query": q}
+                        })}},
+                        {"standard": {"query": _wrap({
+                            "semantic": {"field": "semantic_body", "query": q}
+                        })}},
+                    ],
+                    "rank_window_size": 50,
+                    "rank_constant": 60,
+                }
+            },
+            "size": size,
+            "from": offset,
+            "_source": common_source,
+            "aggs": common_aggs,
+        }
+    else:
+        query: dict[str, Any]
+        if must or filter_clauses:
+            query = {"bool": {}}
+            if must:
+                query["bool"]["must"] = must
+            if filter_clauses:
+                query["bool"]["filter"] = filter_clauses
+        else:
+            query = {"match_all": {}}
+
+        if sort == "relevance" and q:
+            sort_clause: list[dict[str, Any]] = [
+                {"_score": {"order": "desc"}},
+                {"published_at": {"order": "desc", "missing": "_last"}},
+            ]
+        else:
+            sort_clause = [{"published_at": {"order": "desc", "missing": "_last"}}]
+
+        search_body = {
+            "query": query,
+            "size": size,
+            "from": offset,
+            "sort": sort_clause,
+            "_source": common_source,
+            "aggs": common_aggs,
+        }
 
     search_resp = await es.search(index=CONTENT_ITEMS_INDEX, body=search_body)
 

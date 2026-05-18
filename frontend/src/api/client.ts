@@ -154,6 +154,7 @@ export function searchContent(params?: {
   consumed?: "true" | "false";
   interest?: "up" | "down" | "none";
   q?: string;
+  sort?: "date" | "relevance";
   size?: number;
   offset?: number;
 }): Promise<ContentSearchResponse> {
@@ -163,6 +164,7 @@ export function searchContent(params?: {
   if (params?.consumed) search.set("consumed", params.consumed);
   if (params?.interest) search.set("interest", params.interest);
   if (params?.q) search.set("q", params.q);
+  if (params?.sort) search.set("sort", params.sort);
   if (params?.size !== undefined) search.set("size", String(params.size));
   if (params?.offset !== undefined) search.set("offset", String(params.offset));
   const qs = search.toString();

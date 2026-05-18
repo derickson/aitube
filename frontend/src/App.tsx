@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 
 import { Timeline } from "./components/Timeline";
+import { Search } from "./components/Search";
 import { SubscriptionManager } from "./components/SubscriptionManager";
 import { AddContent } from "./components/AddContent";
 import { NotFound } from "./components/NotFound";
@@ -30,6 +31,7 @@ function AppContent() {
         <h1><span className="logo-ai">AI</span>Tube</h1>
         <nav>
           <NavLink to="/">Timeline</NavLink>
+          <NavLink to="/search/">Search</NavLink>
           <NavLink to="/subscriptions/">Subscriptions</NavLink>
           <NavLink to="/add-content/">Add Content</NavLink>
         </nav>
@@ -38,6 +40,7 @@ function AppContent() {
       <main>
         <Routes>
           <Route path="/" element={<Timeline />} />
+          <Route path="/search/" element={<Search />} />
           <Route path="/subscriptions/" element={<SubscriptionManager />} />
           <Route path="/add-content/" element={<AddContent />} />
           <Route path="*" element={<NotFound />} />

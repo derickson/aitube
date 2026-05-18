@@ -8,6 +8,12 @@ class Settings(BaseSettings):
     elasticsearch_url: str = "http://localhost:9200"
     elasticsearch_api_key: str = ""
 
+    # Content index + semantic search (flip to v2 + true after EIS reindex cutover)
+    content_items_index: str = "aitube-content-items"
+    enable_semantic_search: bool = False
+    semantic_inference_id: str = ".jina-embeddings-v5-omni-nano"
+    content_items_index_v2: str = "aitube-content-items-v2"
+
     # Anthropic
     anthropic_api_key: str = ""
 

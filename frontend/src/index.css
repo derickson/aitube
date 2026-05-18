@@ -750,6 +750,40 @@ main:has(.flyout-open) {
   font-style: italic;
 }
 
+/* Search */
+
+.search-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.search-input-wrap {
+  margin-bottom: 1.25rem;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+}
+
+.search-result-count {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
 /* Timeline */
 
 .timeline-header {
