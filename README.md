@@ -84,6 +84,18 @@ Or poll manually:
 uv run python -m backend.scripts.poll_feeds
 ```
 
+Rebuild **Topic Flow** clusters nightly (uses Jina v5 clustering-task embeddings; see the Topic Flow section below):
+
+```
+0 4 * * * cd /path/to/aitube && uv run aitube-cluster >> /path/to/aitube/cron.log 2>&1
+```
+
+Or trigger manually:
+
+```bash
+uv run aitube-cluster   # equivalent to: uv run python -m backend.scripts.rebuild_clusters
+```
+
 ## Configuration
 
 Set in `.env`:
@@ -93,6 +105,7 @@ Set in `.env`:
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch endpoint |
 | `ELASTICSEARCH_API_KEY` | | Elasticsearch API key |
 | `ANTHROPIC_API_KEY` | | Claude API key for summaries and ad detection |
+| `JINA_API_KEY` | | Jina API key for Topic Flow clustering embeddings |
 | `CONTENT_DLP_URL` | `http://localhost:7055` | content-dlp HTTP service URL |
 | `YOUTUBE_MAX_AGE_DAYS` | `5` | Only poll YouTube videos newer than this |
 | `PODCAST_MAX_AGE_DAYS` | `5` | Only poll podcast episodes newer than this |
@@ -144,6 +157,39 @@ When new content is discovered during polling:
 4. **All types:** Claude generates a summary with a bullet-point breakdown of key topics. Videos and podcasts include clickable timestamps that seek the player. Duplicate content items are automatically detected and removed after each poll cycle.
 
 
+## Topic Flow
+
+Unsupervised document clustering over the recent corpus, following the [Elastic Search Labs methodology](https://www.elastic.co/search-labs/blog/unsupervised-document-clustering-elasticsearch-jina-embeddings). The **Topic Flow** tab visualises the result as a UMAP scatter plot plus a per-cluster timeline.
+
+Pipeline (`backend/app/services/clustering.py`):
+
+1. Fetch the last `CLUSTER_LOOKBACK_DAYS` (default 30) of content items from Elasticsearch.
+2. Embed `title + summary` per doc via the Jina API with `task=clustering` (model `jina-embeddings-v5-omni-nano`, 768-dim). Embeddings are cached on the doc — only new docs are re-embedded on subsequent runs.
+3. Pick centroid seeds: density-probe 5% of docs via cosine kNN, then greedily diversify (reject seeds whose cosine ≥ `CLUSTER_SEED_SEPARATION` to an existing seed).
+4. Classify every doc to its nearest seed when cosine ≥ `CLUSTER_SIMILARITY_THRESHOLD`, otherwise mark as noise.
+5. Dissolve clusters smaller than `CLUSTER_MIN_SIZE` back to noise.
+6. Label each cluster via the Elasticsearch `significant_text` aggregation on `title` and `summary` (top JLH terms; clusters with no distinguishing vocabulary are dissolved).
+7. Project all embeddings to 2D via UMAP (cosine metric, viz only — clustering happens in the full 768-dim space).
+8. Persist per-doc `cluster_id`, `cluster_run_id`, `umap_x`, `umap_y` to the content index; write a run summary to `aitube-cluster-runs`.
+
+A typical 30-day / ~600-doc rebuild takes ~30s cold and ~15s warm (UMAP is the bottleneck once embeddings are cached). UI loads from `GET /api/topic-flow/latest/`.
+
+Tunables (in `.env`, all optional):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JINA_API_KEY` | | Required — Jina API key |
+| `JINA_CLUSTERING_MODEL` | `jina-embeddings-v5-omni-nano` | Jina model identifier |
+| `JINA_CLUSTERING_TASK` | `clustering` | LoRA task (`clustering` for v5; `separation` for v3) |
+| `JINA_CLUSTERING_DIMS` | `768` | Embedding dimensionality (must match the model) |
+| `CLUSTER_LOOKBACK_DAYS` | `30` | Rolling window of content to cluster |
+| `CLUSTER_SIMILARITY_THRESHOLD` | `0.62` | Doc-to-centroid cosine cutoff; lower = fewer noise / looser clusters |
+| `CLUSTER_SEED_SEPARATION` | `0.55` | Max cosine between accepted seeds; lower = more, finer clusters |
+| `CLUSTER_MIN_SIZE` | `3` | Clusters smaller than this dissolve to noise |
+| `CLUSTER_MAX_SEEDS` | `40` | Hard cap on cluster count per run |
+| `UMAP_NEIGHBORS` | `15` | UMAP `n_neighbors` (viz only) |
+| `UMAP_MIN_DIST` | `0.1` | UMAP `min_dist` (viz only) |
+
 ## Features
 
 - **Unified timeline** with faceted search (type, watched/unwatched, interest, source) powered by Elasticsearch
@@ -160,6 +206,7 @@ When new content is discovered during polling:
 - **Light/dark theme** toggle
 - **Ad-hoc content** — add any YouTube video, podcast MP3, or web article directly via the Add Content page with metadata preview before processing
 - **Subscription management** with per-feed interest notes, type-colored cards, search, and filters
+- **Topic Flow** — unsupervised clustering of the recent corpus (Jina v5 clustering-task embeddings, density-probed centroid seeds, `significant_text` labels, UMAP scatter). New tab shows a 2D map of all clusters plus a per-topic timeline of content cards
 
 ## Project Structure
 
@@ -176,6 +223,7 @@ backend/
       polling.py         # Feed poll triggers
       chat.py            # Streaming content Q&A with agents
       add_content.py   # Add Content preview + confirm (YouTube, podcast, article)
+      topic_flow.py    # Topic Flow read API (latest run, per-cluster items)
     services/
       elasticsearch.py   # ES client, index mappings, lifecycle
       content_dlp.py     # HTTP client for content-dlp service on host
@@ -187,9 +235,12 @@ backend/
       metadata_extractor.py # LLM-powered metadata extraction for ad-hoc content
       content_cleanup.py # Two-stage article cleanup (regex + LLM)
       agents.py          # Agent registry for content chat
+      jina_embeddings.py # Jina API client (task=clustering)
+      clustering.py      # Topic Flow pipeline (embed, seed, classify, label, UMAP)
     models/              # Pydantic schemas
   scripts/
     poll_feeds.py        # Crontab entry point
+    rebuild_clusters.py  # Crontab entry point for Topic Flow rebuilds
 frontend/
   public/
     images/              # Pixel art assets (logo, empty states)
@@ -201,6 +252,8 @@ frontend/
       ChatPanel.tsx          # Streaming chat for content Q&A
       SubscriptionManager.tsx # Subscription CRUD with URL resolver
       AddContent.tsx         # Ad-hoc content submission with preview
+      Search.tsx             # Full-text + semantic search
+      TopicFlow.tsx          # Topic Flow tab (Plotly UMAP scatter + cluster cards + timeline)
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
     theme/               # Light/dark theme
@@ -240,6 +293,8 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/consumption_report/` | Engagement report (consumed, viewed, watch %, interest) |
 | POST | `/api/add-content/preview/` | Preview metadata for any URL (YouTube, podcast MP3, article) |
 | POST | `/api/add-content/confirm/` | Confirm and process previewed content in background |
+| GET | `/api/topic-flow/latest/` | Latest Topic Flow run: clusters, labels, UMAP points |
+| GET | `/api/topic-flow/cluster/{cluster_id}/items/` | Content items belonging to a cluster (per `run_id`) |
 
 ## Automation API
 
