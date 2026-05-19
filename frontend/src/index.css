@@ -267,6 +267,11 @@ main:has(.flyout-open) {
   margin-bottom: 1.5rem;
 }
 
+.subs-header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .add-form {
   background: var(--card-bg);
   border: 1px solid var(--border);
