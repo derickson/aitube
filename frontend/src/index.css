@@ -111,10 +111,17 @@ body {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
-  padding: 0.4rem 0.8rem;
+  padding: 0.4rem;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.theme-toggle:hover {
+  color: var(--accent);
 }
 
 main {
