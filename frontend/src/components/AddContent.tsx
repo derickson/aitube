@@ -44,7 +44,12 @@ function formatDate(iso: string): string {
   }
 }
 
-export function AddContent() {
+interface AddContentProps {
+  embedded?: boolean;
+  onCancel?: () => void;
+}
+
+export function AddContent({ embedded = false, onCancel }: AddContentProps = {}) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<ContentPreviewResponse | null>(null);
@@ -94,10 +99,13 @@ export function AddContent() {
     setError("");
   };
 
-  return (
-    <div className="add-content">
-      <h2>Add Content</h2>
+  const handleCancel = () => {
+    handleReset();
+    onCancel?.();
+  };
 
+  const body = (
+    <>
       {error && <ErrorBanner error={error} />}
 
       {confirmed ? (
@@ -205,7 +213,7 @@ export function AddContent() {
                   >
                     {confirming ? "Submitting..." : "Add to Library"}
                   </button>
-                  <button className="btn" onClick={handleReset}>
+                  <button className="btn" onClick={handleCancel}>
                     Cancel
                   </button>
                 </div>
@@ -214,6 +222,17 @@ export function AddContent() {
           </div>
         </>
       )}
+    </>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <div className="add-content">
+      <h2>Add Content</h2>
+      {body}
     </div>
   );
 }

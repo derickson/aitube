@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { ErrorBanner } from "./ErrorBanner";
+import { AddContent } from "./AddContent";
 import {
   listSubscriptions,
   createSubscription,
@@ -45,7 +46,8 @@ export function SubscriptionManager() {
   const [statusFilter, setStatusFilter] = useState<SubscriptionStatus | "all">("all");
 
   // Add flow state
-  const [showAdd, setShowAdd] = useState(false);
+  const [addMode, setAddMode] = useState<"none" | "subscription" | "content">("none");
+  const showAdd = addMode === "subscription";
   const [addUrl, setAddUrl] = useState("");
   const [resolving, setResolving] = useState(false);
   const [preview, setPreview] = useState<ResolvedPreview | null>(null);
@@ -134,7 +136,7 @@ export function SubscriptionManager() {
       setPreview(null);
       setAddNotes("");
       setNameOverride("");
-      setShowAdd(false);
+      setAddMode("none");
       fetchSubs();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add subscription");
@@ -144,7 +146,7 @@ export function SubscriptionManager() {
   };
 
   const handleCancelAdd = () => {
-    setShowAdd(false);
+    setAddMode("none");
     setAddUrl("");
     setPreview(null);
     setAddNotes("");
@@ -194,10 +196,29 @@ export function SubscriptionManager() {
     <div className="subscriptions">
       <div className="subs-header">
         <h2>Subscriptions</h2>
-        <button className="btn btn-primary" onClick={() => (showAdd ? handleCancelAdd() : setShowAdd(true))}>
-          {showAdd ? "Cancel" : "+ Add Subscription"}
-        </button>
+        <div className="subs-header-actions">
+          <button
+            className="btn btn-primary"
+            onClick={() =>
+              addMode === "subscription" ? handleCancelAdd() : setAddMode("subscription")
+            }
+          >
+            {addMode === "subscription" ? "Cancel" : "+ Add Subscription"}
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() =>
+              addMode === "content" ? setAddMode("none") : setAddMode("content")
+            }
+          >
+            {addMode === "content" ? "Cancel" : "+ Add Content"}
+          </button>
+        </div>
       </div>
+
+      {addMode === "content" && (
+        <AddContent embedded onCancel={() => setAddMode("none")} />
+      )}
 
       {error && <ErrorBanner error={error} />}
 
