@@ -28,10 +28,15 @@ export function Timeline() {
   // Selected content for inline player
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [consumedIds, setConsumedIds] = useState<Set<string>>(new Set());
+  // Items the user has just acted on whose change isn't yet visible in ES
+  // search results. Hidden client-side until the next intentional refetch
+  // (filter change / mount) clears this set and the server becomes authoritative.
+  const [pendingHidden, setPendingHidden] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
-  const fetchDataRef = useRef<() => void>(undefined);
+  const consumedFilterRef = useRef<"true" | "false" | "">("false");
+  const interestFilterRef = useRef<"up" | "down" | "none" | "">("");
 
   const handleConsumedChange = useCallback((itemId: string, consumed: boolean, callApi = false) => {
     if (callApi) {
@@ -43,8 +48,18 @@ export function Timeline() {
       else next.delete(itemId);
       return next;
     });
-    // Re-fetch after a short delay to let ES update
-    setTimeout(() => fetchDataRef.current?.(), 500);
+    setPendingHidden((prev) => {
+      const next = new Set(prev);
+      const filter = consumedFilterRef.current;
+      // Hide if the item no longer matches the active consumed filter.
+      if ((filter === "false" && consumed) || (filter === "true" && !consumed)) {
+        next.add(itemId);
+      } else {
+        // Toggle-back: if the user reverses their action, unhide.
+        next.delete(itemId);
+      }
+      return next;
+    });
   }, []);
 
   // Playback progress (lazy loaded)
@@ -56,6 +71,8 @@ export function Timeline() {
   const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">("");
   const [subFilter, setSubFilter] = useState("");
   const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
+  consumedFilterRef.current = consumedFilter;
+  interestFilterRef.current = interestFilter;
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -77,6 +94,8 @@ export function Timeline() {
       ]);
       setData(contentData);
       setConsumedIds(new Set(contentData.items.filter((i) => i.consumed).map((i) => i.id)));
+      // Fresh server state — drop any client-side hides; server is authoritative now.
+      setPendingHidden(new Set());
       const subMap: Record<string, Subscription> = {};
       for (const s of subData) subMap[s.id] = s;
       setSubs(subMap);
@@ -96,8 +115,6 @@ export function Timeline() {
     }
   }, [debouncedSearch, typeFilter, subFilter, consumedFilter, interestFilter]);
 
-  fetchDataRef.current = fetchData;
-
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -111,9 +128,15 @@ export function Timeline() {
     return () => { document.body.style.overflow = ""; };
   }, [selectedId]);
 
-  const handleInterestChange = useCallback(async (itemId: string, value: "up" | "down" | "none") => {
-    await apiSetInterest(itemId, value).catch(() => {});
-    setTimeout(() => fetchDataRef.current?.(), 500);
+  const handleInterestChange = useCallback((itemId: string, value: "up" | "down" | "none") => {
+    apiSetInterest(itemId, value).catch(() => {});
+    setPendingHidden((prev) => {
+      const next = new Set(prev);
+      const filter = interestFilterRef.current;
+      if (filter && filter !== value) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
   }, []);
 
   const handleSearchChange = (value: string) => {
@@ -124,7 +147,7 @@ export function Timeline() {
     }, 300);
   };
 
-  const items = data?.items ?? [];
+  const items = (data?.items ?? []).filter((i) => !pendingHidden.has(i.id));
   const facets = data?.facets ?? {};
   const total = data?.total ?? 0;
 
