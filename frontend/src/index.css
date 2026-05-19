@@ -1827,3 +1827,151 @@ main:has(.flyout-open) {
     width: 100%;
   }
 }
+
+/* === Topic Flow === */
+
+.topic-flow-page {
+  padding: 1rem 2rem 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.topic-flow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.topic-flow-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.topic-flow-stats strong {
+  color: var(--text);
+  font-size: 1.05rem;
+  margin-right: 0.25rem;
+}
+
+.topic-flow-meta {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.topic-flow-plot {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  min-height: 520px;
+}
+
+.topic-flow-clusters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+.topic-flow-cluster-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  transition: background 0.1s, transform 0.05s;
+}
+
+.topic-flow-cluster-card:hover {
+  background: var(--bg-secondary);
+}
+
+.topic-flow-cluster-card.active {
+  background: var(--bg-secondary);
+  outline: 2px solid var(--accent);
+}
+
+.topic-flow-cluster-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.topic-flow-cluster-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.topic-flow-cluster-label {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-flow-cluster-size {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.topic-flow-cluster-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.topic-flow-term {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+
+.topic-flow-timeline {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.topic-flow-timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.topic-flow-timeline-header h2 {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.topic-flow-clear {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.3rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.topic-flow-clear:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+}

@@ -276,6 +276,51 @@ export function confirmContent(
   });
 }
 
+// --- Topic Flow ---
+
+export interface TopicFlowCluster {
+  id: string;
+  label: string;
+  size: number;
+  top_terms: string[];
+  representative_item_ids: string[];
+}
+
+export interface TopicFlowPoint {
+  item_id: string;
+  cluster_id: string | null;
+  x: number;
+  y: number;
+  title: string;
+  type: string;
+  thumbnail_url: string | null;
+  published_at: string | null;
+}
+
+export interface TopicFlowResponse {
+  run_id: string;
+  created_at: string;
+  doc_count: number;
+  noise_count: number;
+  embedding_model: string;
+  lookback_days: number;
+  clusters: TopicFlowCluster[];
+  points: TopicFlowPoint[];
+}
+
+export function getTopicFlowLatest(): Promise<TopicFlowResponse> {
+  return apiFetch("/topic-flow/latest/");
+}
+
+export function getTopicFlowClusterItems(
+  clusterId: string,
+  runId: string,
+  size: number = 100,
+): Promise<ContentItemSummary[]> {
+  const qs = new URLSearchParams({ run_id: runId, size: String(size) });
+  return apiFetch(`/topic-flow/cluster/${encodeURIComponent(clusterId)}/items/?${qs}`);
+}
+
 export function ingestContent(
   url: string,
   title?: string,

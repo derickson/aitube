@@ -35,5 +35,21 @@ class Settings(BaseSettings):
     podcast_max_age_days: int = 5
     rss_max_age_days: int = 90
 
+    # Topic-flow clustering (Jina task=clustering embeddings)
+    jina_api_key: str = ""
+    jina_embeddings_url: str = "https://api.jina.ai/v1/embeddings"
+    # v5 with task="clustering" matches the blog post; v3 would use task="separation".
+    jina_clustering_model: str = "jina-embeddings-v5-omni-nano"
+    jina_clustering_task: str = "clustering"
+    jina_clustering_dims: int = 768
+    cluster_lookback_days: int = 30
+    cluster_similarity_threshold: float = 0.62
+    cluster_seed_separation: float = 0.55
+    cluster_min_size: int = 3
+    cluster_density_sample_pct: float = 0.05
+    cluster_max_seeds: int = 40
+    umap_neighbors: int = 15
+    umap_min_dist: float = 0.1
+
 
 settings = Settings()

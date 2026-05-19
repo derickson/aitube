@@ -7,6 +7,22 @@ CONTENT_ITEMS_INDEX = settings.content_items_index
 CONTENT_ITEMS_INDEX_V1 = "aitube-content-items"
 CONTENT_ITEMS_INDEX_V2 = settings.content_items_index_v2
 PLAYBACK_STATE_INDEX = "aitube-playback-state"
+CLUSTER_RUNS_INDEX = "aitube-cluster-runs"
+
+
+_CLUSTERING_FIELDS = {
+    "clustering_vector": {
+        "type": "dense_vector",
+        "dims": settings.jina_clustering_dims,
+        "index": True,
+        "similarity": "cosine",
+    },
+    "clustering_vector_model": {"type": "keyword"},
+    "cluster_id": {"type": "keyword"},
+    "cluster_run_id": {"type": "keyword"},
+    "umap_x": {"type": "float"},
+    "umap_y": {"type": "float"},
+}
 
 _client: AsyncElasticsearch | None = None
 
@@ -65,6 +81,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "content_markdown": {"type": "text"},
                 "content_dlp_cache_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": False},
+                **_CLUSTERING_FIELDS,
             }
         }
     },
@@ -108,6 +125,21 @@ INDEX_MAPPINGS: dict[str, dict] = {
                     "type": "semantic_text",
                     "inference_id": settings.semantic_inference_id,
                 },
+                **_CLUSTERING_FIELDS,
+            }
+        }
+    },
+    CLUSTER_RUNS_INDEX: {
+        "mappings": {
+            "properties": {
+                "run_id": {"type": "keyword"},
+                "created_at": {"type": "date"},
+                "lookback_days": {"type": "integer"},
+                "doc_count": {"type": "integer"},
+                "noise_count": {"type": "integer"},
+                "embedding_model": {"type": "keyword"},
+                "params": {"type": "object", "enabled": False},
+                "clusters": {"type": "object", "enabled": False},
             }
         }
     },
