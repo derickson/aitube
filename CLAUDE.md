@@ -73,6 +73,20 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 - `aitube-subscriptions` — Feed subscriptions (youtube_channel, podcast, rss)
 - `aitube-content-items` — All content with full-text search, facets on type/subscription_id/consumed/viewed/user_interest
 - `aitube-playback-state` — Playback position tracking
+- `aitube-quarantine-events` — Audit log of post-ingest quarantines (one row per item; subsequent calls are no-ops)
+
+### Quarantine / transcript-judge API
+
+External trusted callers (aitube-sync, Hermes/Rex) can inspect the first ~5 min of a video's transcript and remove bad recommendations from the active timeline without polluting watch time or the preference model. The judgement layer itself lives outside AI Tube.
+
+Auth: `Authorization: Bearer <token>` against `AITUBE_AUTOMATION_TOKEN` in `.env`. If unset, these endpoints return 503 (fail closed).
+
+- `GET /api/content/{item_id}/transcript/?max_seconds=300` — returns segments + joined text up to the cap. If transcript not yet generated: `{"ok": false, "error": "transcript_not_ready", ...}` with 200. Also returns `viewed/consumed/user_interest/quarantined` so callers can reconcile.
+- `GET /api/content/by-external-id/yt_{video_id}/transcript/?max_seconds=300` — same, looked up by external_id.
+- `POST /api/content/{item_id}/quarantine/` — body `{"reason_code", "reason", "source", "mark_viewed": true, "watch_seconds": 0}`. Sets `consumed=true` + `viewed=true` (so it leaves the watchlist), persists `quarantined_at/quarantine_reason_code/quarantine_reason/quarantine_source` on the doc, and appends one row to `aitube-quarantine-events`. Idempotent: a second call returns `already_quarantined=true` and writes nothing. Does **not** set `user_interest=down` (would pollute preference model). Does **not** write to `aitube-playback-state` (no fake watch time). The content item is preserved, not deleted.
+- `POST /api/content/by-external-id/yt_{video_id}/quarantine/` — same by external_id.
+
+Suggested n8n webhook names if exposed: `aitube-content-transcript`, `aitube-quarantine-content-item`.
 
 ### Environment
 

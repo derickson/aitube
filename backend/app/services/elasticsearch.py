@@ -8,6 +8,7 @@ CONTENT_ITEMS_INDEX_V1 = "aitube-content-items"
 CONTENT_ITEMS_INDEX_V2 = settings.content_items_index_v2
 PLAYBACK_STATE_INDEX = "aitube-playback-state"
 CLUSTER_RUNS_INDEX = "aitube-cluster-runs"
+QUARANTINE_EVENTS_INDEX = "aitube-quarantine-events"
 
 
 _CLUSTERING_FIELDS = {
@@ -81,6 +82,10 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "content_markdown": {"type": "text"},
                 "content_dlp_cache_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": False},
+                "quarantined_at": {"type": "date"},
+                "quarantine_reason_code": {"type": "keyword"},
+                "quarantine_reason": {"type": "text"},
+                "quarantine_source": {"type": "keyword"},
                 **_CLUSTERING_FIELDS,
             }
         }
@@ -117,6 +122,10 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "content_markdown": {"type": "text", "copy_to": "semantic_body"},
                 "content_dlp_cache_id": {"type": "keyword"},
                 "metadata": {"type": "object", "enabled": False},
+                "quarantined_at": {"type": "date"},
+                "quarantine_reason_code": {"type": "keyword"},
+                "quarantine_reason": {"type": "text"},
+                "quarantine_source": {"type": "keyword"},
                 "semantic_headline": {
                     "type": "semantic_text",
                     "inference_id": settings.semantic_inference_id,
@@ -140,6 +149,19 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "embedding_model": {"type": "keyword"},
                 "params": {"type": "object", "enabled": False},
                 "clusters": {"type": "object", "enabled": False},
+            }
+        }
+    },
+    QUARANTINE_EVENTS_INDEX: {
+        "mappings": {
+            "properties": {
+                "content_item_id": {"type": "keyword"},
+                "external_id": {"type": "keyword"},
+                "source": {"type": "keyword"},
+                "reason_code": {"type": "keyword"},
+                "reason": {"type": "text"},
+                "transcript_excerpt_sha256": {"type": "keyword"},
+                "created_at": {"type": "date"},
             }
         }
     },
