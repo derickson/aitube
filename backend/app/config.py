@@ -24,10 +24,6 @@ class Settings(BaseSettings):
     # Content-DLP
     content_dlp_url: str = "http://localhost:7055"
 
-    # Trusted-automation auth (aitube-sync, Hermes/Rex transcript judge, etc.)
-    # When empty, write endpoints behind this auth are disabled (return 503).
-    automation_token: str = ""
-
     # Elastic APM (Observability)
     elastic_apm_server_url: str = ""
     elastic_apm_secret_token: str = ""

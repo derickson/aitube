@@ -6,8 +6,9 @@ ingested content item and, if necessary, quarantine it: remove it from
 Dave's active timeline without adding watch-time pollution, and persist
 an audit trail.
 
-Auth: bearer token from settings.automation_token. The judgement layer
-itself (deciding *what* is bad) lives outside AI Tube.
+Auth: the perimeter is enforced by nginx basic-auth in front of the
+backend, matching the rest of the API. The judgement layer itself
+(deciding *what* is bad) lives outside AI Tube.
 """
 
 from __future__ import annotations
@@ -18,10 +19,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from backend.app.config import settings
 from backend.app.services import content_cache
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
@@ -31,25 +31,6 @@ from backend.app.services.elasticsearch import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/content", tags=["quarantine"])
-
-
-# ---- auth -------------------------------------------------------------------
-
-
-def require_automation_token(authorization: str | None = Header(default=None)) -> str:
-    """Validate `Authorization: Bearer <token>` against settings.automation_token."""
-    if not settings.automation_token:
-        # Fail closed: if no token is configured, the endpoint is disabled.
-        raise HTTPException(
-            status_code=503,
-            detail="automation_token not configured on this server",
-        )
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
-    if token != settings.automation_token:
-        raise HTTPException(status_code=401, detail="invalid bearer token")
-    return token
 
 
 # ---- response models --------------------------------------------------------
@@ -311,11 +292,7 @@ async def _do_quarantine(
 # ---- endpoints --------------------------------------------------------------
 
 
-@router.get(
-    "/{item_id}/transcript/",
-    response_model=None,
-    dependencies=[Depends(require_automation_token)],
-)
+@router.get("/{item_id}/transcript/", response_model=None)
 async def get_transcript(
     item_id: str,
     max_seconds: float = Query(default=300.0, gt=0, le=86400),
@@ -326,11 +303,7 @@ async def get_transcript(
     )
 
 
-@router.get(
-    "/by-external-id/{external_id}/transcript/",
-    response_model=None,
-    dependencies=[Depends(require_automation_token)],
-)
+@router.get("/by-external-id/{external_id}/transcript/", response_model=None)
 async def get_transcript_by_external_id(
     external_id: str,
     max_seconds: float = Query(default=300.0, gt=0, le=86400),
@@ -341,21 +314,13 @@ async def get_transcript_by_external_id(
     )
 
 
-@router.post(
-    "/{item_id}/quarantine/",
-    response_model=QuarantineResponse,
-    dependencies=[Depends(require_automation_token)],
-)
+@router.post("/{item_id}/quarantine/", response_model=QuarantineResponse)
 async def quarantine_item(item_id: str, body: QuarantineRequest) -> QuarantineResponse:
     source = await _resolve_by_id(item_id)
     return await _do_quarantine(item_id=item_id, source=source, body=body)
 
 
-@router.post(
-    "/by-external-id/{external_id}/quarantine/",
-    response_model=QuarantineResponse,
-    dependencies=[Depends(require_automation_token)],
-)
+@router.post("/by-external-id/{external_id}/quarantine/", response_model=QuarantineResponse)
 async def quarantine_by_external_id(
     external_id: str, body: QuarantineRequest,
 ) -> QuarantineResponse:

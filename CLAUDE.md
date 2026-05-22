@@ -79,7 +79,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 
 External trusted callers (aitube-sync, Hermes/Rex) can inspect the first ~5 min of a video's transcript and remove bad recommendations from the active timeline without polluting watch time or the preference model. The judgement layer itself lives outside AI Tube.
 
-Auth: `Authorization: Bearer <token>` against `AITUBE_AUTOMATION_TOKEN` in `.env`. If unset, these endpoints return 503 (fail closed).
+Auth: same posture as the rest of the API — perimeter is enforced by nginx basic-auth in front of the backend, so the FastAPI handlers do no auth themselves.
 
 - `GET /api/content/{item_id}/transcript/?max_seconds=300` — returns segments + joined text up to the cap. If transcript not yet generated: `{"ok": false, "error": "transcript_not_ready", ...}` with 200. Also returns `viewed/consumed/user_interest/quarantined` so callers can reconcile.
 - `GET /api/content/by-external-id/yt_{video_id}/transcript/?max_seconds=300` — same, looked up by external_id.

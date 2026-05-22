@@ -3,7 +3,10 @@
 Requires:
   - Backend running on localhost:3103
   - Elasticsearch accessible and indices created
-  - AITUBE_AUTOMATION_TOKEN set in backend `.env` (also exported here)
+
+Perimeter auth is enforced by nginx basic-auth in production, not the
+FastAPI layer, so these tests hit the backend directly without auth
+headers — matching the production posture once past the proxy.
 
 Tests seed fixture content items directly into Elasticsearch so we don't
 have to rely on real YouTube ingestion. Each test cleans up its own
@@ -13,7 +16,6 @@ fixture doc and any audit events on teardown.
 from __future__ import annotations
 
 import os
-import time
 import uuid
 from datetime import datetime, timezone
 
@@ -24,7 +26,6 @@ import pytest
 BASE_URL = "http://localhost:3103"
 ES_URL = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
 ES_API_KEY = os.environ.get("ELASTICSEARCH_API_KEY", "")
-TOKEN = os.environ.get("AITUBE_AUTOMATION_TOKEN", "test-automation-token")
 
 CONTENT_INDEX = os.environ.get("CONTENT_ITEMS_INDEX", "aitube-content-items")
 EVENTS_INDEX = "aitube-quarantine-events"
@@ -44,11 +45,6 @@ def _es_headers() -> dict[str, str]:
 def es():
     with httpx.Client(base_url=ES_URL, headers=_es_headers(), timeout=30) as c:
         yield c
-
-
-@pytest.fixture()
-def auth_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"}
 
 
 def _make_doc(
@@ -126,7 +122,7 @@ def seeded(es: httpx.Client, request):
 # ---- tests ------------------------------------------------------------------
 
 
-def test_transcript_available_returns_first_window(seeded, auth_headers):
+def test_transcript_available_returns_first_window(seeded):
     chunks = [
         {"text": "hello there.", "start": 0.0, "end": 2.5},
         {"text": "today we talk about AI.", "start": 2.5, "end": 7.0},
@@ -141,7 +137,6 @@ def test_transcript_available_returns_first_window(seeded, auth_headers):
         resp = api.get(
             f"/api/content/{item_id}/transcript/",
             params={"max_seconds": 300},
-            headers=auth_headers,
         )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -157,7 +152,7 @@ def test_transcript_available_returns_first_window(seeded, auth_headers):
     assert "today we talk about AI" in body["transcript"]
 
 
-def test_transcript_not_ready_returns_error_payload(seeded, auth_headers):
+def test_transcript_not_ready_returns_error_payload(seeded):
     item_id, _ = seeded(
         external_id=f"yt_notready_{uuid.uuid4().hex[:6]}",
         transcript_text=None,
@@ -166,7 +161,6 @@ def test_transcript_not_ready_returns_error_payload(seeded, auth_headers):
     with httpx.Client(base_url=BASE_URL, timeout=30) as api:
         resp = api.get(
             f"/api/content/{item_id}/transcript/",
-            headers=auth_headers,
         )
     # 200 with ok=false (clear error payload, not a 500)
     assert resp.status_code == 200, resp.text
@@ -176,7 +170,7 @@ def test_transcript_not_ready_returns_error_payload(seeded, auth_headers):
     assert body["content_item_id"] == item_id
 
 
-def test_transcript_by_external_id(seeded, auth_headers):
+def test_transcript_by_external_id(seeded):
     chunks = [{"text": "intro.", "start": 0.0, "end": 1.0}]
     _, ext = seeded(
         external_id=f"yt_byext_{uuid.uuid4().hex[:6]}",
@@ -186,7 +180,6 @@ def test_transcript_by_external_id(seeded, auth_headers):
     with httpx.Client(base_url=BASE_URL, timeout=30) as api:
         resp = api.get(
             f"/api/content/by-external-id/{ext}/transcript/",
-            headers=auth_headers,
         )
     assert resp.status_code == 200
     body = resp.json()
@@ -194,7 +187,7 @@ def test_transcript_by_external_id(seeded, auth_headers):
     assert body["transcript_available"] is True
 
 
-def test_quarantine_removes_item_from_timeline(seeded, auth_headers, es):
+def test_quarantine_removes_item_from_timeline(seeded, es):
     item_id, ext = seeded(external_id=f"yt_quar_{uuid.uuid4().hex[:6]}")
 
     # Sanity check: appears in watchlist before quarantine
@@ -206,7 +199,6 @@ def test_quarantine_removes_item_from_timeline(seeded, auth_headers, es):
     with httpx.Client(base_url=BASE_URL, timeout=30) as api:
         resp = api.post(
             f"/api/content/{item_id}/quarantine/",
-            headers=auth_headers,
             json={
                 "reason_code": "business_funnel_ai_content",
                 "reason": "First five minutes are an AI agency funnel.",
@@ -240,13 +232,12 @@ def test_quarantine_removes_item_from_timeline(seeded, auth_headers, es):
     assert doc.get("quarantined_at")
 
 
-def test_quarantine_does_not_increment_watch_time(seeded, auth_headers, es):
+def test_quarantine_does_not_increment_watch_time(seeded, es):
     item_id, _ = seeded(external_id=f"yt_nowatch_{uuid.uuid4().hex[:6]}")
 
     with httpx.Client(base_url=BASE_URL, timeout=30) as api:
         api.post(
             f"/api/content/{item_id}/quarantine/",
-            headers=auth_headers,
             json={
                 "reason_code": "test_no_watch_time",
                 "reason": "",
@@ -261,7 +252,7 @@ def test_quarantine_does_not_increment_watch_time(seeded, auth_headers, es):
     assert pb.json() in (None, {})
 
 
-def test_quarantine_is_idempotent(seeded, auth_headers, es):
+def test_quarantine_is_idempotent(seeded, es):
     item_id, ext = seeded(external_id=f"yt_idem_{uuid.uuid4().hex[:6]}")
     body = {
         "reason_code": "test_idempotent",
@@ -271,10 +262,9 @@ def test_quarantine_is_idempotent(seeded, auth_headers, es):
         "watch_seconds": 0,
     }
     with httpx.Client(base_url=BASE_URL, timeout=30) as api:
-        r1 = api.post(f"/api/content/{item_id}/quarantine/", headers=auth_headers, json=body)
+        r1 = api.post(f"/api/content/{item_id}/quarantine/", json=body)
         r2 = api.post(
             f"/api/content/{item_id}/quarantine/",
-            headers=auth_headers,
             json={**body, "reason": "second call"},
         )
     assert r1.status_code == 200 and r2.status_code == 200
@@ -292,12 +282,11 @@ def test_quarantine_is_idempotent(seeded, auth_headers, es):
     assert count == 1, f"expected exactly one audit event, got {count}"
 
 
-def test_quarantine_persists_reason_and_source(seeded, auth_headers, es):
+def test_quarantine_persists_reason_and_source(seeded, es):
     item_id, ext = seeded(external_id=f"yt_audit_{uuid.uuid4().hex[:6]}")
     with httpx.Client(base_url=BASE_URL, timeout=30) as api:
         api.post(
             f"/api/content/{item_id}/quarantine/",
-            headers=auth_headers,
             json={
                 "reason_code": "business_funnel_ai_content",
                 "reason": "Get-rich AI agency pitch.",
@@ -320,32 +309,4 @@ def test_quarantine_persists_reason_and_source(seeded, auth_headers, es):
     assert src.get("created_at")
 
 
-def test_unauthenticated_quarantine_is_rejected(seeded):
-    item_id, _ = seeded(external_id=f"yt_unauth_{uuid.uuid4().hex[:6]}")
-    with httpx.Client(base_url=BASE_URL, timeout=30) as api:
-        no_token = api.post(
-            f"/api/content/{item_id}/quarantine/",
-            json={
-                "reason_code": "x",
-                "reason": "",
-                "source": "pytest",
-            },
-        )
-        bad_token = api.post(
-            f"/api/content/{item_id}/quarantine/",
-            headers={"Authorization": "Bearer not-the-real-token"},
-            json={
-                "reason_code": "x",
-                "reason": "",
-                "source": "pytest",
-            },
-        )
-    assert no_token.status_code == 401
-    assert bad_token.status_code == 401
 
-
-def test_unauthenticated_transcript_is_rejected(seeded):
-    item_id, _ = seeded(external_id=f"yt_unauthtx_{uuid.uuid4().hex[:6]}")
-    with httpx.Client(base_url=BASE_URL, timeout=30) as api:
-        resp = api.get(f"/api/content/{item_id}/transcript/")
-    assert resp.status_code == 401
