@@ -32,8 +32,23 @@ dev: init
 
 stop:
 	@echo "Stopping local servers..."
-	-pkill -f "uvicorn backend.app.main:app"
-	-pkill -f "vite.*--port 8103"
+	@for port in 3103 8103; do \
+		pids=$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null); \
+		if [ -n "$$pids" ]; then \
+			echo "  port $$port: TERM $$pids"; \
+			kill $$pids 2>/dev/null || true; \
+		fi; \
+	done
+	@sleep 1
+	@for port in 3103 8103; do \
+		pids=$$(lsof -ti tcp:$$port -sTCP:LISTEN 2>/dev/null); \
+		if [ -n "$$pids" ]; then \
+			echo "  port $$port: KILL $$pids"; \
+			kill -9 $$pids 2>/dev/null || true; \
+		fi; \
+	done
+	-@pkill -f "uvicorn backend.app.main:app" 2>/dev/null; true
+	-@pkill -f "vite.*--port 8103" 2>/dev/null; true
 
 test:
 	uv run pytest -v
