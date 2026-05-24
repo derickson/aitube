@@ -9,6 +9,7 @@ CONTENT_ITEMS_INDEX_V2 = settings.content_items_index_v2
 PLAYBACK_STATE_INDEX = "aitube-playback-state"
 CLUSTER_RUNS_INDEX = "aitube-cluster-runs"
 QUARANTINE_EVENTS_INDEX = "aitube-quarantine-events"
+SUMMARY_EVAL_INDEX = settings.summary_eval_index
 
 
 _CLUSTERING_FIELDS = {
@@ -172,6 +173,43 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "position_seconds": {"type": "float"},
                 "consumed": {"type": "boolean"},
                 "last_updated_at": {"type": "date"},
+            }
+        }
+    },
+    SUMMARY_EVAL_INDEX: {
+        "mappings": {
+            "properties": {
+                "item_id": {"type": "keyword"},
+                "external_id": {"type": "keyword"},
+                "title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                "type": {"type": "keyword"},
+                "evaluated_at": {"type": "date"},
+                "haiku": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "text"},
+                        "latency_ms": {"type": "float"},
+                        "format_violations": {"type": "keyword"},
+                    },
+                },
+                "hermes": {
+                    "type": "object",
+                    "properties": {
+                        "summary": {"type": "text"},
+                        "model": {"type": "keyword"},
+                        "latency_ms": {"type": "float"},
+                        "format_violations": {"type": "keyword"},
+                    },
+                },
+                "judge": {
+                    "type": "object",
+                    "properties": {
+                        "engine": {"type": "keyword"},
+                        "winner": {"type": "keyword"},
+                        "scores": {"type": "object", "enabled": False},
+                        "rationale": {"type": "text"},
+                    },
+                },
             }
         }
     },

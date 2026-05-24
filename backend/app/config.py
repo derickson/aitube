@@ -17,6 +17,21 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str = ""
 
+    # Hermes summarization offload via `hermes -z` over SSH. Disabled by default;
+    # when off, summaries use Claude Haiku exactly as before.
+    hermes_enabled: bool = False
+    hermes_ssh_target: str = "hermes"      # ssh destination: ~/.ssh/config alias, or user@host
+    hermes_ssh_opts: str = ""              # extra ssh args, e.g. "-i /run/secrets/hermes_key -p 22"
+    hermes_model: str = "gpt-5.4-mini"     # `-m` model for summaries; "" = Hermes profile default
+    hermes_profile: str = "aitube"         # `-p` dedicated neutral profile (no "Rex" persona)
+    hermes_timeout_seconds: int = 120
+
+    # Summarizer evaluation (Haiku vs Hermes). Off in normal operation.
+    summary_eval_index: str = "aitube-summary-evals"
+    # Shadow eval: fraction of live summaries (0.0-1.0) for which we ALSO run the other
+    # engine and store the pair for comparison. 0 = off (no extra calls/cost).
+    summary_eval_shadow_rate: float = 0.0
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

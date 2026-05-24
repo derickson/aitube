@@ -21,6 +21,11 @@ make docker-start      # Start Docker containers
 uv run python -m backend.scripts.poll_feeds
 ```
 
+**Evaluating summarizers (Haiku vs Hermes/GPT-5.4 mini):**
+```bash
+HERMES_ENABLED=true uv run python -m backend.scripts.eval_summarizers --n 30
+```
+
 ## Architecture
 
 AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into a single timeline with AI-powered summaries and interest scoring.
@@ -33,7 +38,9 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
   - `content_cleanup.py` — Two-stage article cleanup: deterministic pre-clean (regex patterns) then head+tail LLM cleanup via Claude Haiku
   - `content_dlp.py` — HTTP client to content-dlp service on host (port 7055), not subprocess calls
   - `youtube_captions.py` — yt-dlp for captions + livestream detection (via `is_live`/`was_live`)
-  - `summarizer.py` — Claude Sonnet for content summaries with bullet-point breakdowns and timestamps
+  - `summarizer.py` — content summaries with bullet-point breakdowns and timestamps. Tries Hermes (GPT-5.4 mini via SSH) first when `HERMES_ENABLED=true`, falling back to Claude Haiku on any failure. Both engines run the identical prompt from `_build_summary_prompt`.
+  - `hermes_client.py` — offloads a prompt to the Hermes agent on a VPS via `ssh … 'hermes -p aitube -t "" -m gpt-5.4-mini -z "$(cat)"'` (prompt piped over stdin, read remotely with `"$(cat)"` so it needs no escaping). Returns None on any failure so the caller falls back to Haiku.
+  - `summary_eval.py` — head-to-head Haiku vs Hermes: runs both engines on one item, applies deterministic format checks, and scores them with a neutral Claude Sonnet judge (blind + A/B-randomized). Backs `scripts/eval_summarizers.py`.
   - `metadata_extractor.py` — Claude Haiku for extracting podcast titles from transcripts and article metadata from scraped markdown
   - `elasticsearch.py` — Async ES client with index mappings and lifecycle
 - **Config** (`backend/app/config.py`): Pydantic Settings reading from `.env`. Key: `content_dlp_url` defaults to localhost:7055, overridden to `host.docker.internal:7055` in Docker via `docker-compose.yml` environment block.
@@ -74,6 +81,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 - `aitube-content-items` — All content with full-text search, facets on type/subscription_id/consumed/viewed/user_interest
 - `aitube-playback-state` — Playback position tracking
 - `aitube-quarantine-events` — Audit log of post-ingest quarantines (one row per item; subsequent calls are no-ops)
+- `aitube-summary-evals` — Haiku-vs-Hermes summarization eval records (both summaries, format violations, latency, judge scores/winner)
 
 ### Quarantine / transcript-judge API
 

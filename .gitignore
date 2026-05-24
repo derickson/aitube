@@ -26,3 +26,4 @@ frontend/dist/
 cron.log
 
 .playwright-cli/
+evals/
