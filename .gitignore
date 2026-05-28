@@ -26,4 +26,5 @@ frontend/dist/
 cron.log
 
 .playwright-cli/
+.pytest_cache/
 evals/
