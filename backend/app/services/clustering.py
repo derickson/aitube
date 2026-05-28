@@ -17,6 +17,7 @@ adapted for an AITube-sized corpus (thousands, not millions, of docs):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import random
@@ -325,6 +326,113 @@ def _is_good_term(token: str) -> bool:
     return True
 
 
+def _clean_title(text: str, max_words: int = 5) -> str:
+    """Normalize an LLM-proposed topic title to <= max_words, no surrounding quotes/punct."""
+    cleaned = text.strip()
+    cleaned = re.sub(r"^[\s\-–—•*\"']+", "", cleaned)       # leading list markers / quotes
+    cleaned = re.sub(r"[\s.;:,–—\-\"']+$", "", cleaned)     # trailing punctuation / quotes
+    words = cleaned.split()
+    return " ".join(words[:max_words])
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    """Pull the first {...} object out of an LLM response (tolerates code fences / prose)."""
+    if not text:
+        return None
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1)
+    else:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            return None
+        candidate = text[start : end + 1]
+    try:
+        obj = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _build_naming_prompt(
+    cluster_member_ids: dict[str, list[str]],
+    cluster_info: dict[str, dict[str, Any]],
+    titles_by_id: dict[str, str],
+    rng: random.Random,
+    sample_titles: int,
+) -> str:
+    """Compose a single prompt that asks Hermes to title every cluster at once."""
+    blocks: list[str] = []
+    for cid in sorted(cluster_member_ids.keys()):
+        ids = cluster_member_ids[cid]
+        terms = cluster_info.get(cid, {}).get("top_terms", [])
+        titles = [t for t in (titles_by_id.get(i, "").strip() for i in ids) if t]
+        if len(titles) > sample_titles:
+            titles = rng.sample(titles, sample_titles)
+        kw = ", ".join(terms) if terms else "(none)"
+        title_lines = "\n".join(f"  - {t}" for t in titles) or "  (none)"
+        blocks.append(f"Cluster {cid}:\n  keywords: {kw}\n  sample titles:\n{title_lines}")
+
+    return (
+        "You are labeling topic clusters from a personal media feed "
+        "(YouTube videos, podcasts, articles).\n"
+        "For each cluster below, write a concise topic title capturing what its items share.\n\n"
+        "Rules:\n"
+        "- At most 5 words per title.\n"
+        "- Title Case. No surrounding quotes, no trailing punctuation, no numbering.\n"
+        '- Specific and human-readable (e.g. "Local LLM Tooling", not "AI Stuff").\n'
+        "- Base the title only on that cluster's keywords and sample titles.\n\n"
+        "Return ONLY a JSON object mapping each cluster id to its title, for example:\n"
+        '{"c00": "Local LLM Tooling", "c01": "Home Espresso Gear"}\n\n'
+        + "\n\n".join(blocks)
+    )
+
+
+async def _name_clusters_via_hermes(
+    cluster_member_ids: dict[str, list[str]],
+    cluster_info: dict[str, dict[str, Any]],
+    titles_by_id: dict[str, str],
+    rng: random.Random,
+    sample_titles: int = 20,
+) -> dict[str, str]:
+    """Ask Hermes for a <=5-word title per cluster. Returns {cluster_id: title}.
+
+    Best-effort: returns {} on any failure (disabled, ssh error, unparseable) so the
+    caller keeps the significant-term labels.
+    """
+    if not settings.hermes_enabled or not cluster_member_ids:
+        return {}
+
+    prompt = _build_naming_prompt(
+        cluster_member_ids, cluster_info, titles_by_id, rng, sample_titles
+    )
+    from backend.app.services.hermes_client import run_oneshot
+
+    try:
+        resp = await run_oneshot(prompt)
+    except Exception as exc:  # never let naming break a clustering run
+        logger.warning("Hermes cluster naming raised: %s", exc)
+        return {}
+    if not resp:
+        logger.info("Hermes cluster naming returned nothing; keeping term labels")
+        return {}
+
+    obj = _extract_json_object(resp)
+    if not obj:
+        logger.warning("Hermes cluster naming output was unparseable")
+        return {}
+
+    names: dict[str, str] = {}
+    for cid in cluster_member_ids:
+        raw = obj.get(cid)
+        if isinstance(raw, str):
+            title = _clean_title(raw)
+            if title:
+                names[cid] = title
+    logger.info("Hermes named %d/%d clusters", len(names), len(cluster_member_ids))
+    return names
+
+
 async def _bulk_write_assignments(
     docs: list[dict[str, Any]],
     cluster_of: dict[str, str | None],
@@ -441,6 +549,16 @@ async def rebuild_clusters() -> dict[str, Any]:
             cluster_member_ids.pop(cid, None)
             cluster_info.pop(cid, None)
         logger.info("dissolved %d label-less clusters", len(to_dissolve))
+
+    # Upgrade the term-based labels to LLM-written topic titles via Hermes. The
+    # significant-term label stays as the fallback whenever Hermes is off or fails.
+    titles_by_id = {d["id"]: d.get("title") or "" for d in docs}
+    hermes_names = await _name_clusters_via_hermes(
+        cluster_member_ids, cluster_info, titles_by_id, rng
+    )
+    for cid, name in hermes_names.items():
+        if cid in cluster_info:
+            cluster_info[cid]["label"] = name
 
     noise_count = sum(1 for cid in cluster_of.values() if cid is None)
     await _bulk_write_assignments(docs, cluster_of, coords, run_id)

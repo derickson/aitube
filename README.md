@@ -159,7 +159,7 @@ When new content is discovered during polling:
 
 ## Topic Flow
 
-Unsupervised document clustering over the recent corpus, following the [Elastic Search Labs methodology](https://www.elastic.co/search-labs/blog/unsupervised-document-clustering-elasticsearch-jina-embeddings). The **Topic Flow** tab visualises the result as a UMAP scatter plot plus a per-cluster timeline.
+Unsupervised document clustering over the recent corpus, following the [Elastic Search Labs methodology](https://www.elastic.co/search-labs/blog/unsupervised-document-clustering-elasticsearch-jina-embeddings). The **Topic Flow** tab visualises the result as two charts in a collapsible Analytics panel — a UMAP cluster map and a "topic story chains" flow diagram (one horizontal ribbon per cluster across the day axis, its thickness tracking daily item count and tapering in/out at the cluster's first/last active day, sharing the map's colors) — above a grid of topic cards. Selecting a topic (from either chart or a card) collapses the charts, scrolls the topics to the top, and lists that cluster's items; opening an item shows it in the sticky right-hand flyout.
 
 Pipeline (`backend/app/services/clustering.py`):
 
@@ -169,10 +169,11 @@ Pipeline (`backend/app/services/clustering.py`):
 4. Classify every doc to its nearest seed when cosine ≥ `CLUSTER_SIMILARITY_THRESHOLD`, otherwise mark as noise.
 5. Dissolve clusters smaller than `CLUSTER_MIN_SIZE` back to noise.
 6. Label each cluster via the Elasticsearch `significant_text` aggregation on `title` and `summary` (top JLH terms; clusters with no distinguishing vocabulary are dissolved).
-7. Project all embeddings to 2D via UMAP (cosine metric, viz only — clustering happens in the full 768-dim space).
-8. Persist per-doc `cluster_id`, `cluster_run_id`, `umap_x`, `umap_y` to the content index; write a run summary to `aitube-cluster-runs`.
+7. Name each cluster with a human-readable topic title (≤5 words) via one batched Hermes call (`-p aitube -t '' -z`, prompt over stdin) seeded with the cluster's keywords + up to 20 randomly-sampled member titles. Off (or any SSH/parse failure) falls back to the `significant_text` term label. Gated on `HERMES_ENABLED` — see `_name_clusters_via_hermes`.
+8. Project all embeddings to 2D via UMAP (cosine metric, viz only — clustering happens in the full 768-dim space).
+9. Persist per-doc `cluster_id`, `cluster_run_id`, `umap_x`, `umap_y` to the content index; write a run summary to `aitube-cluster-runs`.
 
-A typical 30-day / ~600-doc rebuild takes ~30s cold and ~15s warm (UMAP is the bottleneck once embeddings are cached). UI loads from `GET /api/topic-flow/latest/`.
+A typical 30-day / ~600-doc rebuild takes ~35s cold and ~15s warm (UMAP + the Hermes naming call are the bottlenecks once embeddings are cached). The UI loads the cluster map from `GET /api/topic-flow/latest/` and the swimlane series from `GET /api/topic-flow/flow/` (per-cluster daily counts over a gap-free day axis).
 
 Tunables (in `.env`, all optional):
 
@@ -206,7 +207,7 @@ Tunables (in `.env`, all optional):
 - **Light/dark theme** toggle
 - **Ad-hoc content** — add any YouTube video, podcast MP3, or web article directly via the Add Content page with metadata preview before processing
 - **Subscription management** with per-feed interest notes, type-colored cards, search, and filters
-- **Topic Flow** — unsupervised clustering of the recent corpus (Jina v5 clustering-task embeddings, density-probed centroid seeds, `significant_text` labels, UMAP scatter). New tab shows a 2D map of all clusters plus a per-topic timeline of content cards
+- **Topic Flow** — unsupervised clustering of the recent corpus (Jina v5 clustering-task embeddings, density-probed centroid seeds, Hermes-written ≤5-word topic titles). Tab shows a UMAP cluster map and a "topic story chains" flow diagram (per-cluster ribbons over time, shared colors) above selectable topic cards
 
 ## Project Structure
 
@@ -253,7 +254,8 @@ frontend/
       SubscriptionManager.tsx # Subscription CRUD with URL resolver
       AddContent.tsx         # Ad-hoc content submission with preview
       Search.tsx             # Full-text + semantic search
-      TopicFlow.tsx          # Topic Flow tab (Plotly UMAP scatter + cluster cards + timeline)
+      TopicFlow.tsx          # Topic Flow tab (Plotly UMAP scatter + story chains + cards + flyout)
+      TopicStoryChains.tsx   # Custom SVG temporal "story chains" flow diagram
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
     theme/               # Light/dark theme
@@ -294,6 +296,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | POST | `/api/add-content/preview/` | Preview metadata for any URL (YouTube, podcast MP3, article) |
 | POST | `/api/add-content/confirm/` | Confirm and process previewed content in background |
 | GET | `/api/topic-flow/latest/` | Latest Topic Flow run: clusters, labels, UMAP points |
+| GET | `/api/topic-flow/flow/` | Per-cluster daily content counts for the swimlane flow chart |
 | GET | `/api/topic-flow/cluster/{cluster_id}/items/` | Content items belonging to a cluster (per `run_id`) |
 
 ## Automation API

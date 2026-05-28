@@ -308,8 +308,25 @@ export interface TopicFlowResponse {
   points: TopicFlowPoint[];
 }
 
+export interface TopicFlowDailySeries {
+  cluster_id: string;
+  label: string;
+  counts: number[];
+}
+
+export interface TopicFlowOverTime {
+  run_id: string;
+  days: string[];
+  series: TopicFlowDailySeries[];
+}
+
 export function getTopicFlowLatest(): Promise<TopicFlowResponse> {
   return apiFetch("/topic-flow/latest/");
+}
+
+export function getTopicFlowOverTime(runId?: string): Promise<TopicFlowOverTime> {
+  const qs = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+  return apiFetch(`/topic-flow/flow/${qs}`);
 }
 
 export function getTopicFlowClusterItems(

@@ -1782,7 +1782,8 @@ main:has(.flyout-open) {
     display: flex;
   }
 
-  .timeline-layout {
+  .timeline-layout,
+  .topic-flow-layout {
     display: block;
   }
 
@@ -1790,7 +1791,8 @@ main:has(.flyout-open) {
     grid-template-columns: 1fr;
   }
 
-  .timeline-layout.flyout-open .content-grid {
+  .timeline-layout.flyout-open .content-grid,
+  .topic-flow-layout.flyout-open .topic-flow-main {
     display: none;
   }
 
@@ -1831,9 +1833,23 @@ main:has(.flyout-open) {
 /* === Topic Flow === */
 
 .topic-flow-page {
-  padding: 1rem 2rem 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 1rem 0 2rem;
+}
+
+/* Flex shell so the ContentView flyout docks as a sticky right sidebar
+   (mirrors .timeline-layout). On mobile the global .flyout rule takes over. */
+.topic-flow-layout {
+  display: flex;
+  gap: 1rem;
+}
+
+.topic-flow-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.topic-flow-layout.flyout-open .content-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 }
 
 .topic-flow-header {
@@ -1841,6 +1857,123 @@ main:has(.flyout-open) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 0.75rem;
+}
+
+/* Analytics accordion */
+.topic-flow-analytics {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 1.25rem;
+  background: var(--card-bg);
+}
+
+.topic-flow-accordion-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.topic-flow-chevron {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  width: 0.9rem;
+}
+
+.topic-flow-accordion-hint {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.topic-flow-charts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  padding: 0 1rem 1rem;
+}
+
+/* Laptop and up: cluster map and story chains side by side. */
+@media (min-width: 1024px) {
+  .topic-flow-charts {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.topic-flow-chart-block {
+  min-width: 0;
+}
+
+/* Topic Story Chains (custom SVG flow diagram) */
+.topic-flow-chains-wrap {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.topic-flow-chains-svg {
+  display: block;
+}
+
+.topic-flow-chains-tip {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -135%);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text);
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.topic-flow-chart-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.4rem;
+}
+
+.topic-flow-empty {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 2rem 0;
+}
+
+.topic-flow-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.topic-flow-section-head h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.topic-flow-section-sub {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 .topic-flow-stats {
@@ -1868,8 +2001,6 @@ main:has(.flyout-open) {
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  margin-bottom: 1rem;
-  min-height: 520px;
 }
 
 .topic-flow-clusters {
