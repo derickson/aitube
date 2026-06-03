@@ -26,6 +26,9 @@ services:
       context: frontend
       dockerfile: Dockerfile
       args:
+        # RUM is opt-in and defaults to off (browser intake currently fails in prod).
+        # Backend Python APM is unaffected — it uses the separate ELASTIC_APM_* vars.
+        - VITE_ELASTIC_APM_RUM_ENABLED=${VITE_ELASTIC_APM_RUM_ENABLED:-false}
         - VITE_ELASTIC_APM_SERVER_URL=${VITE_ELASTIC_APM_SERVER_URL:-}
         - VITE_ELASTIC_APM_ENVIRONMENT=${VITE_ELASTIC_APM_ENVIRONMENT:-development}
     ports:

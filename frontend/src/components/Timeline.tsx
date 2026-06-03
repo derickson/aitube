@@ -130,6 +130,13 @@ export function Timeline() {
 
   const handleInterestChange = useCallback((itemId: string, value: "up" | "down" | "none") => {
     apiSetInterest(itemId, value).catch(() => {});
+    // Optimistically reflect the new interest on the card (green/red active state)
+    // until the next intentional refetch makes the server authoritative.
+    setData((prev) =>
+      prev
+        ? { ...prev, items: prev.items.map((i) => (i.id === itemId ? { ...i, user_interest: value === "none" ? null : value } : i)) }
+        : prev,
+    );
     setPendingHidden((prev) => {
       const next = new Set(prev);
       const filter = interestFilterRef.current;
