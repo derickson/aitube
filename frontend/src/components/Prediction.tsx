@@ -85,16 +85,17 @@ export function Prediction() {
 
   const handleInterestChange = useCallback((itemId: string, value: "up" | "down" | "none") => {
     apiSetInterest(itemId, value).catch(() => {});
-    // Optimistically reflect the new interest on the card; re-rank in the
-    // background so the item migrates between sections.
+    // Optimistically reflect the new interest on the card (+/- active state).
+    // The item only migrates between sections on the next intentional refetch
+    // (Refresh / remount); refetching here would race the ES refresh and clobber
+    // the optimistic state with stale data.
     setData((prev) => {
       if (!prev) return prev;
       const apply = (items: ContentItemSummary[]) =>
         items.map((i) => (i.id === itemId ? { ...i, user_interest: value === "none" ? null : value } : i));
       return { ...prev, interesting: apply(prev.interesting), not_interesting: apply(prev.not_interesting) };
     });
-    fetchData(false);
-  }, [fetchData]);
+  }, []);
 
   const handleConsumedChange = useCallback((itemId: string, consumed: boolean, callApi = false) => {
     if (callApi) {
@@ -106,16 +107,18 @@ export function Prediction() {
       else next.delete(itemId);
       return next;
     });
-    // A consumed item leaves the unwatched watchlist — hide it, then re-fetch
-    // to backfill the section from the next-ranked candidate.
+    // A consumed item leaves the unwatched watchlist — hide it optimistically.
+    // Server becomes authoritative on the next intentional refetch (Refresh /
+    // remount), by which point the ES write has been refreshed. Do NOT refetch
+    // here: ES hasn't yet refreshed the consumed write, so it would return the
+    // item as still-unwatched and reset the hidden set, undoing this change.
     setHidden((prev) => {
       const next = new Set(prev);
       if (consumed) next.add(itemId);
       else next.delete(itemId);
       return next;
     });
-    fetchData(false);
-  }, [fetchData]);
+  }, []);
 
   const renderGrid = (items: ContentItemSummary[], emptyText: string) => {
     const visible = items.filter((i) => !hidden.has(i.id));
