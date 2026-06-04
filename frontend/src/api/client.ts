@@ -44,6 +44,13 @@ export interface Transcript {
   chunks: TranscriptChunk[];
 }
 
+export interface Engagement {
+  prediction: "engaged" | "not_engaged" | null;
+  score: number | null; // P(engaged), 0..1
+  prediction_probability: number | null;
+  model_id: string | null;
+}
+
 export interface ContentItemSummary {
   id: string;
   subscription_id: string;
@@ -60,6 +67,7 @@ export interface ContentItemSummary {
   user_interest: "up" | "down" | null;
   consumed: boolean;
   viewed: boolean;
+  engagement?: Engagement | null;
 }
 
 export interface ContentItem extends ContentItemSummary {
@@ -173,6 +181,18 @@ export function searchContent(params?: {
 
 export function getContentItem(id: string): Promise<ContentItem> {
   return apiFetch(`/content/${id}/`);
+}
+
+export interface PredictionResponse {
+  interesting: ContentItemSummary[];
+  not_interesting: ContentItemSummary[];
+  total_unwatched: number;
+  scored: number;
+  unscored: number;
+}
+
+export function getPredictions(limit?: number): Promise<PredictionResponse> {
+  return apiFetch(`/content/predictions/${limit != null ? `?limit=${limit}` : ""}`);
 }
 
 export function transcribeContentItem(id: string): Promise<{ status: string; transcript_length: number }> {

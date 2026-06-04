@@ -93,7 +93,7 @@ async def list_content(
             "subscription_id", "external_id", "type", "title", "url",
             "published_at", "discovered_at", "duration_seconds",
             "thumbnail_url", "summary", "interest_score",
-            "user_interest", "consumed", "viewed",
+            "user_interest", "consumed", "viewed", "engagement",
         ]
     }
     common_aggs = {
@@ -194,6 +194,109 @@ async def list_content(
     response = ContentSearchResponse(items=items, total=total, facets=facets)
     content_cache.put(cache_params, response)
     return response
+
+
+class PredictionResponse(BaseModel):
+    interesting: list[ContentItemSummary]
+    not_interesting: list[ContentItemSummary]
+    total_unwatched: int
+    scored: int
+    unscored: int
+
+
+@router.get("/predictions/", response_model=PredictionResponse)
+async def predictions(limit: int | None = Query(default=None, le=500)):
+    """ML-ranked watchlist split.
+
+    Top section: every unwatched video predicted interesting (P(engaged) > 50%,
+    i.e. engagement == "engaged") OR explicitly marked interesting
+    (user_interest == "up").
+    Bottom section: every unwatched video predicted not interesting (P(engaged)
+    <= 50%) OR explicitly marked not interested (user_interest == "down").
+    User marks always win and are pinned to the top of their section. Pass
+    `limit` to cap each section; omit it to return all matching videos.
+    """
+    es = get_es_client()
+
+    unwatched = {
+        "bool": {
+            "should": [
+                {"term": {"consumed": False}},
+                {"bool": {"must_not": {"exists": {"field": "consumed"}}}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+    base_filter = [{"term": {"type": "video"}}, unwatched]
+
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {"bool": {"filter": base_filter}},
+            "size": 1000,
+            "_source": {
+                "includes": [
+                    "subscription_id", "external_id", "type", "title", "url",
+                    "published_at", "discovered_at", "duration_seconds",
+                    "thumbnail_url", "summary", "interest_score",
+                    "user_interest", "consumed", "viewed", "engagement",
+                ]
+            },
+        },
+    )
+    hits = resp["hits"]["hits"]
+
+    candidates: list[tuple[ContentItemSummary, float | None, bool | None]] = []
+    scored = 0
+    for hit in hits:
+        item = ContentItemSummary(id=hit["_id"], **hit["_source"])
+        eng = item.engagement
+        score = eng.score if eng else None
+        if score is not None:
+            scored += 1
+        # Treat prediction label if present, else threshold the score at 0.5.
+        if eng and eng.prediction:
+            predicted_engaged: bool | None = eng.prediction == "engaged"
+        elif score is not None:
+            predicted_engaged = score >= 0.5
+        else:
+            predicted_engaged = None
+        candidates.append((item, score, predicted_engaged))
+
+    interesting: list[tuple[ContentItemSummary, float | None, bool]] = []
+    not_interesting: list[tuple[ContentItemSummary, float | None, bool]] = []
+    for item, score, predicted_engaged in candidates:
+        marked_up = item.user_interest == "up"
+        marked_down = item.user_interest == "down"
+        # User marks override the model.
+        if marked_up:
+            interesting.append((item, score, True))
+        elif marked_down:
+            not_interesting.append((item, score, True))
+        elif predicted_engaged is True:
+            interesting.append((item, score, False))
+        elif predicted_engaged is False:
+            not_interesting.append((item, score, False))
+        # else: unscored & unmarked -> excluded from both
+
+    # Interesting: user-marked first, then highest P(engaged) first.
+    interesting.sort(key=lambda t: (0 if t[2] else 1, -(t[1] if t[1] is not None else -1.0)))
+    # Not interesting: user-marked first, then lowest P(engaged) first.
+    not_interesting.sort(key=lambda t: (0 if t[2] else 1, t[1] if t[1] is not None else 2.0))
+
+    interesting_items = [t[0] for t in interesting]
+    not_interesting_items = [t[0] for t in not_interesting]
+    if limit is not None:
+        interesting_items = interesting_items[:limit]
+        not_interesting_items = not_interesting_items[:limit]
+
+    return PredictionResponse(
+        interesting=interesting_items,
+        not_interesting=not_interesting_items,
+        total_unwatched=len(candidates),
+        scored=scored,
+        unscored=len(candidates) - scored,
+    )
 
 
 @router.get("/{item_id}/", response_model=ContentItem)

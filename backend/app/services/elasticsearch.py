@@ -12,6 +12,29 @@ QUARANTINE_EVENTS_INDEX = "aitube-quarantine-events"
 SUMMARY_EVAL_INDEX = settings.summary_eval_index
 
 
+# Ingest pipeline that runs the custom engagement classifier (loaded from the
+# aitube-prediction-model sister project). Produces an `engagement` object with
+# `score` = P(engaged) and `prediction` ("engaged"/"not_engaged").
+ENGAGEMENT_PIPELINE = "aitube-engagement"
+
+_ENGAGEMENT_FIELDS = {
+    "engagement": {
+        "properties": {
+            "prediction": {"type": "keyword"},
+            "score": {"type": "float"},
+            "prediction_probability": {"type": "float"},
+            "model_id": {"type": "keyword"},
+            "probabilities": {
+                "type": "nested",
+                "properties": {
+                    "class_name": {"type": "keyword"},
+                    "class_probability": {"type": "float"},
+                },
+            },
+        }
+    },
+}
+
 _CLUSTERING_FIELDS = {
     "clustering_vector": {
         "type": "dense_vector",
@@ -87,6 +110,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "quarantine_reason_code": {"type": "keyword"},
                 "quarantine_reason": {"type": "text"},
                 "quarantine_source": {"type": "keyword"},
+                **_ENGAGEMENT_FIELDS,
                 **_CLUSTERING_FIELDS,
             }
         }
@@ -135,6 +159,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                     "type": "semantic_text",
                     "inference_id": settings.semantic_inference_id,
                 },
+                **_ENGAGEMENT_FIELDS,
                 **_CLUSTERING_FIELDS,
             }
         }
@@ -216,6 +241,24 @@ INDEX_MAPPINGS: dict[str, dict] = {
 }
 
 
+async def _ensure_default_pipeline(es: AsyncElasticsearch, index_name: str) -> None:
+    """Attach the engagement classifier as the index default_pipeline so every
+    newly indexed item is scored on ingest. No-op if the pipeline isn't loaded
+    (it's managed by the aitube-prediction-model project) to avoid breaking
+    indexing with a missing-pipeline error."""
+    try:
+        await es.ingest.get_pipeline(id=ENGAGEMENT_PIPELINE)
+    except Exception:
+        return  # pipeline not deployed; leave indexing untouched
+    try:
+        await es.indices.put_settings(
+            index=index_name,
+            body={"index.default_pipeline": ENGAGEMENT_PIPELINE},
+        )
+    except Exception:
+        pass
+
+
 async def ensure_indices() -> None:
     es = get_es_client()
     for index_name, body in INDEX_MAPPINGS.items():
@@ -230,3 +273,8 @@ async def ensure_indices() -> None:
                 )
             except Exception:
                 pass  # Ignore conflicts with existing field types
+
+    # Wire the engagement classifier onto the content-item indices.
+    for index_name in (CONTENT_ITEMS_INDEX_V1, CONTENT_ITEMS_INDEX_V2):
+        if await es.indices.exists(index=index_name):
+            await _ensure_default_pipeline(es, index_name)

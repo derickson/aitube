@@ -22,6 +22,14 @@ class Transcript(BaseModel):
     chunks: list[TranscriptChunk] = []
 
 
+class Engagement(BaseModel):
+    """ML engagement prediction produced by the `aitube-engagement` ingest pipeline."""
+    prediction: Optional[str] = None  # "engaged" | "not_engaged"
+    score: Optional[float] = None  # P(engaged), 0..1 — use this for ranking
+    prediction_probability: Optional[float] = None
+    model_id: Optional[str] = None
+
+
 class ContentItemSummary(BaseModel):
     """Lightweight model for list/search results (excludes transcript, content_markdown, metadata)."""
     id: str
@@ -39,6 +47,7 @@ class ContentItemSummary(BaseModel):
     user_interest: Optional[str] = None
     consumed: bool = False
     viewed: bool = False
+    engagement: Optional[Engagement] = None
 
 
 class ContentItem(BaseModel):
@@ -62,3 +71,4 @@ class ContentItem(BaseModel):
     content_markdown: str = ""
     content_dlp_cache_id: str = ""
     metadata: dict[str, Any] = {}
+    engagement: Optional[Engagement] = None
