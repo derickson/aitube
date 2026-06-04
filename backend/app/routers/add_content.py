@@ -15,7 +15,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.app.services import content_cache, content_dlp
-from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
+from backend.app.services.elasticsearch import (
+    CONTENT_ITEMS_INDEX,
+    content_index_pipeline,
+    get_es_client,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/add-content", tags=["add-content"])
@@ -375,7 +379,9 @@ async def _process_video(url: str, title_override: str | None) -> None:
 
     es = get_es_client()
     doc_id = str(uuid.uuid4())
-    await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=enriched)
+    await es.index(
+        index=CONTENT_ITEMS_INDEX, id=doc_id, document=enriched, **content_index_pipeline()
+    )
     content_cache.invalidate()
     logger.info("Indexed ad-hoc video '%s' as %s", enriched.get("title", url), doc_id)
 
@@ -454,7 +460,9 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
 
     es = get_es_client()
     doc_id = str(uuid.uuid4())
-    await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)
+    await es.index(
+        index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc, **content_index_pipeline()
+    )
     content_cache.invalidate()
     logger.info("Indexed ad-hoc podcast '%s' as %s", title, doc_id)
 
@@ -539,6 +547,8 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
 
     es = get_es_client()
     doc_id = str(uuid.uuid4())
-    await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)
+    await es.index(
+        index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc, **content_index_pipeline()
+    )
     content_cache.invalidate()
     logger.info("Indexed ad-hoc article '%s' as %s", title, doc_id)

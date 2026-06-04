@@ -364,10 +364,17 @@ async def transcribe_content_item(item_id: str):
     return {"status": "ok", "transcript_length": len(transcript.get("text", ""))}
 
 
+# User-action writes use refresh="wait_for" so the change is searchable before
+# the response returns. Without it, the immediately-following cache-repopulating
+# read (or a client hard-refresh) can re-query ES before its ~1s refresh and
+# cache the pre-write state for the full content_cache TTL — making a
+# just-consumed item linger in unwatched lists.
 @router.put("/{item_id}/consumed/")
 async def set_consumed(item_id: str, consumed: bool = True):
     es = get_es_client()
-    await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"consumed": consumed})
+    await es.update(
+        index=CONTENT_ITEMS_INDEX, id=item_id, doc={"consumed": consumed}, refresh="wait_for"
+    )
     content_cache.invalidate()
     return {"id": item_id, "consumed": consumed}
 
@@ -375,7 +382,9 @@ async def set_consumed(item_id: str, consumed: bool = True):
 @router.put("/{item_id}/viewed/")
 async def set_viewed(item_id: str):
     es = get_es_client()
-    await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"viewed": True})
+    await es.update(
+        index=CONTENT_ITEMS_INDEX, id=item_id, doc={"viewed": True}, refresh="wait_for"
+    )
     content_cache.invalidate()
     return {"id": item_id, "viewed": True}
 
@@ -390,9 +399,15 @@ async def set_interest(item_id: str, interest: str = "up"):
             index=CONTENT_ITEMS_INDEX,
             id=item_id,
             script={"source": "ctx._source.remove('user_interest')"},
+            refresh="wait_for",
         )
     else:
-        await es.update(index=CONTENT_ITEMS_INDEX, id=item_id, doc={"user_interest": interest})
+        await es.update(
+            index=CONTENT_ITEMS_INDEX,
+            id=item_id,
+            doc={"user_interest": interest},
+            refresh="wait_for",
+        )
     content_cache.invalidate()
     return {"id": item_id, "interest": interest if interest != "none" else None}
 

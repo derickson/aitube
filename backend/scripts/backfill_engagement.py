@@ -36,7 +36,14 @@ async def main(content_type: str, only_unwatched: bool) -> None:
             "(python scripts/import_to_elasticsearch.py)."
         )
 
-    filters: list[dict] = [{"term": {"type": content_type}}]
+    # Only score items that don't already have a prediction. Re-running the
+    # inference pipeline over a doc that already has `engagement` throws
+    # ("Illegal list shortcut value [probabilities]"), so this keeps the
+    # backfill idempotent. To re-score, clear engagement first.
+    filters: list[dict] = [
+        {"term": {"type": content_type}},
+        {"bool": {"must_not": {"exists": {"field": "engagement.score"}}}},
+    ]
     if only_unwatched:
         filters.append(
             {
@@ -74,13 +81,9 @@ async def main(content_type: str, only_unwatched: bool) -> None:
     if resp.get("failures"):
         print("First failure:", resp["failures"][0])
 
-    scored = (
-        await es.count(
-            index=CONTENT_ITEMS_INDEX,
-            query={"bool": {"filter": filters + [{"exists": {"field": "engagement.score"}}]}},
-        )
-    )["count"]
-    print(f"{scored}/{total} now have engagement.score materialized.")
+    # How many of this type+scope still lack a score (should be ~0 after a run).
+    remaining = (await es.count(index=CONTENT_ITEMS_INDEX, query=query))["count"]
+    print(f"{total - remaining}/{total} newly scored; {remaining} still unscored.")
     await es.close()
 
 

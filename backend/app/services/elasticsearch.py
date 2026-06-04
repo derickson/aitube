@@ -241,25 +241,23 @@ INDEX_MAPPINGS: dict[str, dict] = {
 }
 
 
-async def _ensure_default_pipeline(es: AsyncElasticsearch, index_name: str) -> None:
-    """Attach the engagement classifier as the index default_pipeline so every
-    newly indexed item is scored on ingest. No-op if the pipeline isn't loaded
-    (it's managed by the aitube-prediction-model project) to avoid breaking
-    indexing with a missing-pipeline error."""
-    try:
-        await es.ingest.get_pipeline(id=ENGAGEMENT_PIPELINE)
-    except Exception:
-        return  # pipeline not deployed; leave indexing untouched
-    try:
-        await es.indices.put_settings(
-            index=index_name,
-            body={"index.default_pipeline": ENGAGEMENT_PIPELINE},
-        )
-    except Exception:
-        pass
+# Whether the engagement classifier pipeline is deployed. Set by ensure_indices
+# at startup; gates whether new content items are scored on ingest.
+_engagement_pipeline_available = False
+
+
+def content_index_pipeline() -> dict:
+    """Index kwargs that attach the engagement classifier when indexing a NEW
+    content item. Empty if the pipeline isn't deployed, so ingestion never
+    breaks. NOTE: applied only at index time — deliberately NOT as the index
+    default_pipeline, because a default_pipeline also runs on _update calls
+    (consumed/viewed/interest), and re-running inference on an already-scored
+    doc throws, which would break those metadata writes."""
+    return {"pipeline": ENGAGEMENT_PIPELINE} if _engagement_pipeline_available else {}
 
 
 async def ensure_indices() -> None:
+    global _engagement_pipeline_available
     es = get_es_client()
     for index_name, body in INDEX_MAPPINGS.items():
         if not await es.indices.exists(index=index_name):
@@ -274,7 +272,25 @@ async def ensure_indices() -> None:
             except Exception:
                 pass  # Ignore conflicts with existing field types
 
-    # Wire the engagement classifier onto the content-item indices.
+    # Detect whether the engagement classifier is available for ingest-time scoring.
+    _engagement_pipeline_available = False
+    try:
+        await es.ingest.get_pipeline(id=ENGAGEMENT_PIPELINE)
+        _engagement_pipeline_available = True
+    except Exception:
+        pass  # pipeline managed by aitube-prediction-model; absent is fine
+
+    # Heal any stale default_pipeline (an earlier version set it on the content
+    # indices, which broke _update writes — see content_index_pipeline).
     for index_name in (CONTENT_ITEMS_INDEX_V1, CONTENT_ITEMS_INDEX_V2):
-        if await es.indices.exists(index=index_name):
-            await _ensure_default_pipeline(es, index_name)
+        try:
+            if not await es.indices.exists(index=index_name):
+                continue
+            current = await es.indices.get_settings(index=index_name)
+            dp = list(current.values())[0]["settings"]["index"].get("default_pipeline")
+            if dp == ENGAGEMENT_PIPELINE:
+                await es.indices.put_settings(
+                    index=index_name, body={"index.default_pipeline": None}
+                )
+        except Exception:
+            pass

@@ -19,6 +19,7 @@ from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
     SUBSCRIPTIONS_INDEX,
+    content_index_pipeline,
     get_es_client,
 )
 
@@ -641,7 +642,9 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                     logger.warning("Failed to summarize %s: %s", doc["title"], e)
 
         doc_id = str(uuid.uuid4())
-        await es.index(index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc)
+        await es.index(
+            index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc, **content_index_pipeline()
+        )
         new_ids.append(doc_id)
         new_external_ids.append(doc["external_id"])
 
