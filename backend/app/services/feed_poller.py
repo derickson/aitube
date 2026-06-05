@@ -20,6 +20,7 @@ from backend.app.services.elasticsearch import (
     PLAYBACK_STATE_INDEX,
     SUBSCRIPTIONS_INDEX,
     content_index_pipeline,
+    detect_engagement_pipeline,
     get_es_client,
 )
 
@@ -977,6 +978,13 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
 async def poll_all_active() -> dict[str, list[str]]:
     """Poll all active subscriptions. Returns {subscription_id: [new_content_ids]}."""
     es = get_es_client()
+    # The cron entry point (scripts/poll_feeds) never runs the app lifespan, so
+    # probe for the engagement classifier here or new items would go unscored
+    # and be invisible to the Prediction tab.
+    if await detect_engagement_pipeline():
+        logger.info("Engagement pipeline available: new items will be scored at ingest")
+    else:
+        logger.warning("Engagement pipeline not deployed: new items will be unscored")
     resp = await es.search(
         index=SUBSCRIPTIONS_INDEX,
         body={

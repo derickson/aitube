@@ -74,6 +74,16 @@ export function Prediction() {
     fetchData();
   }, [fetchData]);
 
+  // Keep the watchlist live: pick up newly polled/scored videos in the
+  // background. Paused while the flyout is open so the grid doesn't reshuffle
+  // mid-watch. Safe to refetch now that consumed/viewed/interest writes use
+  // refresh="wait_for" — the server is authoritative by the next tick.
+  useEffect(() => {
+    if (selectedId) return;
+    const id = window.setInterval(() => fetchData(false), 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [fetchData, selectedId]);
+
   useEffect(() => {
     if (selectedId && window.innerWidth <= 768) {
       document.body.style.overflow = "hidden";

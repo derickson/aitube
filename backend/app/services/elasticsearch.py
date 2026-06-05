@@ -256,8 +256,23 @@ def content_index_pipeline() -> dict:
     return {"pipeline": ENGAGEMENT_PIPELINE} if _engagement_pipeline_available else {}
 
 
-async def ensure_indices() -> None:
+async def detect_engagement_pipeline() -> bool:
+    """Probe ES for the engagement classifier pipeline and update the flag that
+    gates ingest-time scoring. Called by ensure_indices (app startup) and by
+    poll_all_active so the cron poller — which never runs the app lifespan —
+    also scores new items."""
     global _engagement_pipeline_available
+    es = get_es_client()
+    _engagement_pipeline_available = False
+    try:
+        await es.ingest.get_pipeline(id=ENGAGEMENT_PIPELINE)
+        _engagement_pipeline_available = True
+    except Exception:
+        pass  # pipeline managed by aitube-prediction-model; absent is fine
+    return _engagement_pipeline_available
+
+
+async def ensure_indices() -> None:
     es = get_es_client()
     for index_name, body in INDEX_MAPPINGS.items():
         if not await es.indices.exists(index=index_name):
@@ -273,12 +288,7 @@ async def ensure_indices() -> None:
                 pass  # Ignore conflicts with existing field types
 
     # Detect whether the engagement classifier is available for ingest-time scoring.
-    _engagement_pipeline_available = False
-    try:
-        await es.ingest.get_pipeline(id=ENGAGEMENT_PIPELINE)
-        _engagement_pipeline_available = True
-    except Exception:
-        pass  # pipeline managed by aitube-prediction-model; absent is fine
+    await detect_engagement_pipeline()
 
     # Heal any stale default_pipeline (an earlier version set it on the content
     # indices, which broke _update writes — see content_index_pipeline).

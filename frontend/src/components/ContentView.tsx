@@ -157,6 +157,15 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   const description =
     (item.metadata as Record<string, unknown>)?.description?.toString() || "";
 
+  // ML engagement prediction (P(engaged) from the aitube-engagement pipeline)
+  const engScore = item.engagement?.score ?? null;
+  const engPredicted =
+    item.engagement?.prediction != null
+      ? item.engagement.prediction === "engaged"
+      : engScore != null
+        ? engScore >= 0.5
+        : null;
+
   return (
     <aside className="flyout" ref={panelRef}>
       <div className="flyout-sticky">
@@ -167,6 +176,17 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
               {subName && <span className="flyout-meta-source">{subName}</span>}
               {subName && item.published_at && <span className="flyout-meta-sep"> · </span>}
               {item.published_at && <span>{formatPublishDate(item.published_at)}</span>}
+              {engScore != null && engPredicted != null && (
+                <>
+                  <span className="flyout-meta-sep"> · </span>
+                  <span
+                    className={`flyout-meta-prediction flyout-meta-prediction-${engPredicted ? "pos" : "neg"}`}
+                    title="Predicted likelihood you'll watch (model score)"
+                  >
+                    {engPredicted ? "Watch" : "Skip"} {Math.round(engScore * 100)}%
+                  </span>
+                </>
+              )}
             </p>
           </div>
           <div className="flyout-actions">

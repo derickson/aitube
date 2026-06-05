@@ -2175,3 +2175,17 @@ main:has(.flyout-open) {
 
 .prediction-score-pos { background: var(--success); }
 .prediction-score-neg { background: var(--danger); }
+
+/* Inline model-prediction pill in the flyout metadata line */
+.flyout-meta-prediction {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  vertical-align: middle;
+}
+
+.flyout-meta-prediction-pos { background: var(--success); }
+.flyout-meta-prediction-neg { background: var(--danger); }
