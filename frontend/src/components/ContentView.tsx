@@ -145,11 +145,14 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   }
   if (!item) return null;
 
-  const handleMarkViewed = async () => {
+  const handleMarkViewed = () => {
     const newConsumed = !consumed;
-    await apiSetConsumed(itemId, newConsumed).catch(() => {});
+    // Optimistically update the UI first, then persist to Elasticsearch in the
+    // background (fire-and-forget) so the button responds instantly. Mirrors the
+    // timeline checkmark pattern in Timeline.handleConsumedChange.
     setConsumed(newConsumed);
     onConsumedChange?.(itemId, newConsumed);
+    apiSetConsumed(itemId, newConsumed).catch(() => {});
   };
 
   const hasTranscript = item.transcript && (item.transcript.text || item.transcript.chunks?.length > 0);
