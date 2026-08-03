@@ -1068,6 +1068,18 @@ main:has(.flyout-open) {
   to { transform: translateX(0); opacity: 1; }
 }
 
+.flyout.flyout-maximized {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  min-width: unset;
+  height: 100% !important;
+  z-index: 900;
+  margin: 0;
+  border-left: none;
+  border-radius: 0;
+}
+
 .flyout-sticky {
   flex-shrink: 0;
   padding: 1rem 1.25rem;

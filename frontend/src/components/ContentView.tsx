@@ -85,14 +85,19 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   const [currentTime, setCurrentTime] = useState(0);
   const [activeTab, setActiveTab] = useState("summary");
   const [descExpanded, setDescExpanded] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
 
-  // Keep flyout height matched to visible viewport
+  // Keep flyout height matched to visible viewport; yield to CSS when maximized
   useEffect(() => {
     const el = panelRef.current;
     if (!el) return;
+    if (isMaximized) {
+      el.style.height = "";
+      return;
+    }
     const update = () => {
       const rect = el.getBoundingClientRect();
       el.style.height = `${window.innerHeight - rect.top}px`;
@@ -104,7 +109,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
       window.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
     };
-  }, [itemId, loading]);
+  }, [itemId, loading, isMaximized]);
 
   useEffect(() => {
     setLoading(true);
@@ -170,7 +175,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
         : null;
 
   return (
-    <aside className="flyout" ref={panelRef}>
+    <aside className={`flyout${isMaximized ? " flyout-maximized" : ""}`} ref={panelRef}>
       <div className="flyout-sticky">
         <div className="flyout-header">
           <div>
@@ -193,6 +198,12 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
             </p>
           </div>
           <div className="flyout-actions">
+            <button
+              className="btn"
+              onClick={() => setIsMaximized((v) => !v)}
+            >
+              {isMaximized ? "Restore" : "Fill Window"}
+            </button>
             <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
               Original
             </a>
