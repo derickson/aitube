@@ -199,7 +199,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
           </div>
           <div className="flyout-actions">
             <button
-              className="btn"
+              className="btn flyout-maximize-btn"
               onClick={() => setIsMaximized((v) => !v)}
             >
               {isMaximized ? "Restore" : "Fill Window"}

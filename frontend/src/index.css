@@ -1818,14 +1818,42 @@ main:has(.flyout-open) {
     z-index: 200;
     margin: 0;
     border-left: none;
+    /* Single scroll container: all content scrolls together */
+    overflow-y: auto;
   }
 
+  /* flyout-sticky is no longer a fixed-height sticky block on mobile;
+     it flows into the unified scroll container */
   .flyout-sticky {
     padding: 0.75rem;
+    overflow: visible;
+    border-bottom: none;
   }
 
+  /* flyout-scroll defers scrolling to the parent .flyout on mobile */
   .flyout-scroll {
     padding: 0.75rem;
+    flex: none;
+    overflow: visible;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Move the video player above the title/meta/description on mobile */
+  .flyout-sticky .yt-wrapper {
+    order: -1;
+    /* Negative margins cancel the parent's padding so the player is edge-to-edge */
+    margin: -0.75rem -0.75rem 0.25rem;
+    border-radius: 0;
+  }
+
+  .flyout-sticky .audio-container {
+    order: -1;
+    margin-bottom: 0.25rem;
+  }
+
+  /* "Fill Window" makes no sense on mobile (flyout already fills the window) */
+  .flyout-maximize-btn {
+    display: none;
   }
 
   .flyout-header {
