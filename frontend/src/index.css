@@ -817,6 +817,9 @@ main:has(.flyout-open) {
   position: sticky;
   top: 1rem;
   align-self: flex-start;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .facet-search {
@@ -828,6 +831,18 @@ main:has(.flyout-open) {
   color: var(--text);
   font-family: inherit;
   font-size: 0.85rem;
+}
+
+.facet-sub-search {
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.75rem;
+  margin-bottom: 0.1rem;
 }
 
 .facet-group {

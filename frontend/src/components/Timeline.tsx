@@ -71,6 +71,8 @@ export function Timeline() {
   const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">("");
   const [subFilter, setSubFilter] = useState("");
   const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
+  // Client-side filter for the Source facet list
+  const [subSearch, setSubSearch] = useState("");
   consumedFilterRef.current = consumedFilter;
   interestFilterRef.current = interestFilter;
 
@@ -161,11 +163,17 @@ export function Timeline() {
   const typeBuckets = facets.type ?? [];
   const consumedBuckets = facets.consumed ?? [];
   const interestBuckets = facets.interest ?? [];
-  const subBuckets = (facets.subscription_id ?? []).sort((a, b) => {
-    const nameA = subs[a.key]?.name ?? a.key;
-    const nameB = subs[b.key]?.name ?? b.key;
-    return nameA.localeCompare(nameB);
-  });
+  const subBuckets = (facets.subscription_id ?? [])
+    .sort((a, b) => {
+      const nameA = subs[a.key]?.name ?? a.key;
+      const nameB = subs[b.key]?.name ?? b.key;
+      return nameA.localeCompare(nameB);
+    })
+    .filter((b) => {
+      if (!subSearch) return true;
+      const name = subs[b.key]?.name ?? b.key;
+      return name.toLowerCase().includes(subSearch.toLowerCase());
+    });
 
   return (
     <div className="timeline">
@@ -256,20 +264,29 @@ export function Timeline() {
 
           <div className="facet-group">
             <h4 className="facet-heading">Source</h4>
-            <button
-              className={`facet-item${!subFilter ? " active" : ""}`}
-              onClick={() => { setSubFilter(""); closeSidebar(); }}
-            >
-              <span>All</span>
-            </button>
+            <input
+              type="search"
+              className="facet-sub-search"
+              placeholder="Filter sources…"
+              value={subSearch}
+              onChange={(e) => setSubSearch(e.target.value)}
+            />
+            {!subSearch && (
+              <button
+                className={`facet-item${!subFilter ? " active" : ""}`}
+                onClick={() => { setSubFilter(""); closeSidebar(); }}
+              >
+                <span>All</span>
+              </button>
+            )}
             {subBuckets.map((b) => {
               const name = subs[b.key]?.name ?? b.key;
-              const label = name.length > 15 ? name.slice(0, 15) + "…" : name;
+              const label = name.length > 20 ? name.slice(0, 20) + "…" : name;
               return (
                 <button
                   key={b.key}
                   className={`facet-item${subFilter === b.key ? " active" : ""}`}
-                  onClick={() => { setSubFilter(subFilter === b.key ? "" : b.key); closeSidebar(); }}
+                  onClick={() => { setSubFilter(subFilter === b.key ? "" : b.key); setSubSearch(""); closeSidebar(); }}
                   title={name}
                 >
                   <span>{label}</span><span className="facet-count">{b.count}</span>
