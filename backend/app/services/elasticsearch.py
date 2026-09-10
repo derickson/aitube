@@ -97,6 +97,8 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "duration_seconds": {"type": "float"},
                 "thumbnail_url": {"type": "keyword", "index": False},
                 "summary": {"type": "text"},
+                "summary_error": {"type": "text"},
+                "summary_failed_at": {"type": "date"},
                 "interest_score": {"type": "float"},
                 "interest_reasoning": {"type": "text"},
                 "transcript": {"type": "object", "enabled": False},
@@ -132,6 +134,8 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "duration_seconds": {"type": "float"},
                 "thumbnail_url": {"type": "keyword", "index": False},
                 "summary": {"type": "text", "copy_to": "semantic_headline"},
+                "summary_error": {"type": "text"},
+                "summary_failed_at": {"type": "date"},
                 "interest_score": {"type": "float"},
                 "interest_reasoning": {"type": "text"},
                 "transcript": {

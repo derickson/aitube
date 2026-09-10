@@ -86,13 +86,14 @@ def _postprocess_summary(summary: str) -> str:
     return summary
 
 
-async def summarize_via_haiku(prompt: str, title: str = "") -> str | None:
+async def summarize_via_haiku(prompt: str, title: str = "") -> tuple[str | None, str | None]:
     """Run the summary prompt through Claude Haiku, with retries on rate limits.
 
-    Returns the post-processed summary, or None if Anthropic is unconfigured or fails.
+    Returns (summary, error). summary is None if Anthropic is unconfigured or fails,
+    in which case error carries a short description of why.
     """
     if not settings.anthropic_api_key:
-        return None
+        return None, "anthropic not configured"
 
     client = get_anthropic_client()
     max_retries = 3
@@ -106,7 +107,7 @@ async def summarize_via_haiku(prompt: str, title: str = "") -> str | None:
             )
             summary = _postprocess_summary(response.content[0].text)
             logger.info("Generated summary via Haiku for: %s (%d chars)", title[:50], len(summary))
-            return summary
+            return summary, None
 
         except anthropic.RateLimitError:
             if attempt < max_retries - 1:
@@ -116,13 +117,13 @@ async def summarize_via_haiku(prompt: str, title: str = "") -> str | None:
             else:
                 logger.warning("Rate limited (429) summarizing %s, all %d attempts exhausted",
                                title[:50], max_retries)
-                return None
+                return None, "rate limited (429), retries exhausted"
 
         except Exception as e:
             logger.warning("Summarization failed for %s: %s", title[:50], e)
-            return None
+            return None, str(e)[:300]
 
-    return None
+    return None, "unknown failure"
 
 
 async def summarize_content(
@@ -132,20 +133,23 @@ async def summarize_content(
     description: str = "",
     author: str = "",
     transcript_chunks: list[dict[str, Any]] | None = None,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     """
     Generate a brief summary that clarifies what the content is actually about,
     cutting through clickbait titles to surface the real topic, opinion, or thesis.
 
     Tries Hermes (GPT-5.4 mini) first when enabled, falling back to Claude Haiku on
-    any Hermes failure. Returns a summary with bullet-point breakdown (with timestamps
-    for video/podcast), or None if all engines fail / are unconfigured.
+    any Hermes failure. Returns (summary, error): summary has a bullet-point breakdown
+    (with timestamps for video/podcast), or is None if all engines fail / are unconfigured,
+    in which case error carries the last engine's failure message (e.g. Hermes's "model
+    does not exist or you do not have access to it" during a GPT quota cooldown) so callers
+    can persist it and retry later.
     """
     if not settings.anthropic_api_key and not settings.hermes_enabled:
-        return None
+        return None, None
 
     if not transcript_text and not description:
-        return None
+        return None, None
 
     has_timestamps = bool(transcript_chunks)
 
@@ -160,13 +164,17 @@ async def summarize_content(
     )
 
     # 1) Try Hermes (no Anthropic spend). Any miss falls through to Haiku.
+    hermes_error = None
     if settings.hermes_enabled:
         from backend.app.services.hermes_client import run_oneshot
-        hermes_text = await run_oneshot(prompt)
+        hermes_text, hermes_error = await run_oneshot(prompt)
         if hermes_text:
             logger.info("Generated summary via Hermes for: %s (%d chars)", title[:50], len(hermes_text))
-            return _postprocess_summary(hermes_text)
-        logger.info("Hermes summary unavailable for %s, falling back to Haiku", title[:50])
+            return _postprocess_summary(hermes_text), None
+        logger.info("Hermes summary unavailable for %s, falling back to Haiku (%s)", title[:50], hermes_error)
 
     # 2) Fall back to Haiku.
-    return await summarize_via_haiku(prompt, title)
+    haiku_text, haiku_error = await summarize_via_haiku(prompt, title)
+    if haiku_text:
+        return haiku_text, None
+    return None, hermes_error or haiku_error

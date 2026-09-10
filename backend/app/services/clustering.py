@@ -409,7 +409,7 @@ async def _name_clusters_via_hermes(
     from backend.app.services.hermes_client import run_oneshot
 
     try:
-        resp = await run_oneshot(prompt)
+        resp, _error = await run_oneshot(prompt)
     except Exception as exc:  # never let naming break a clustering run
         logger.warning("Hermes cluster naming raised: %s", exc)
         return {}

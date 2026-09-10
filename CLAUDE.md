@@ -34,12 +34,12 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
 
 - **API routers** (`backend/app/routers/`): REST endpoints with trailing slashes (required for reverse proxy). Content search returns faceted aggregations from Elasticsearch. `consumption_report.py` joins content items with playback state to return engagement signals (consumed, viewed, watch_percentage, interest).
 - **Services** (`backend/app/services/`): Core processing pipeline:
-  - `feed_poller.py` — Polls subscriptions, orchestrates the full pipeline: fetch feed → parse entries → dedup → scrape/transcribe → cleanup → summarize → index → deduplicate content → backfill missing transcripts
+  - `feed_poller.py` — Polls subscriptions, orchestrates the full pipeline: fetch feed → parse entries → dedup → scrape/transcribe → cleanup → summarize → index → deduplicate content → backfill missing transcripts → backfill missing summaries → retry failed summaries
   - `content_cleanup.py` — Two-stage article cleanup: deterministic pre-clean (regex patterns) then head+tail LLM cleanup via Claude Haiku
   - `content_dlp.py` — HTTP client to content-dlp service on host (port 7055), not subprocess calls
   - `youtube_captions.py` — yt-dlp for captions + livestream detection (via `is_live`/`was_live`)
-  - `summarizer.py` — content summaries with bullet-point breakdowns and timestamps. Tries Hermes (GPT-5.4 mini via SSH) first when `HERMES_ENABLED=true`, falling back to Claude Haiku on any failure. Both engines run the identical prompt from `_build_summary_prompt`.
-  - `hermes_client.py` — offloads a prompt to the Hermes agent on a VPS via `ssh … 'hermes -p aitube -t "" -m gpt-5.4-mini -z "$(cat)"'` (prompt piped over stdin, read remotely with `"$(cat)"` so it needs no escaping). Returns None on any failure so the caller falls back to Haiku.
+  - `summarizer.py` — content summaries with bullet-point breakdowns and timestamps. Tries Hermes (GPT-5.4 mini via SSH) first when `HERMES_ENABLED=true`, falling back to Claude Haiku on any failure. Both engines run the identical prompt from `_build_summary_prompt`. `summarize_content()` returns `(summary, error)`; on total failure the item is stored with `summary_error`/`summary_failed_at` instead of a summary, so `feed_poller.retry_failed_summaries()` can find and retry it later.
+  - `hermes_client.py` — offloads a prompt to the Hermes agent on a VPS via `ssh … 'hermes -p aitube -t "" -m gpt-5.4-mini -z "$(cat)"'` (prompt piped over stdin, read remotely with `"$(cat)"` so it needs no escaping). `run_oneshot()` returns `(text, error)`; text is None on any failure (disabled, timeout, non-zero exit, empty output) so the caller falls back to Haiku, and `error` carries the raw failure reason (e.g. the ssh/hermes stderr) for persistence.
   - `summary_eval.py` — head-to-head Haiku vs Hermes: runs both engines on one item, applies deterministic format checks, and scores them with a neutral Claude Sonnet judge (blind + A/B-randomized). Backs `scripts/eval_summarizers.py`.
   - `metadata_extractor.py` — Claude Haiku for extracting podcast titles from transcripts and article metadata from scraped markdown
   - `elasticsearch.py` — Async ES client with index mappings and lifecycle
@@ -59,7 +59,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 1. Cron runs `poll_feeds.py` every 30 minutes
 2. For each subscription: fetch feed XML → parse entries → filter by age → dedup against ES
 3. Per new item: scrape content (RSS) or fetch captions (YouTube) → cleanup markdown → generate AI summary → index to ES
-4. Post-poll: deduplicate content items by URL, backfill missing transcripts (up to 5/cycle)
+4. Post-poll: deduplicate content items by URL, backfill missing transcripts (up to 5/cycle), backfill missing summaries (up to 10/cycle), retry summaries that failed on a Hermes GPT-quota cooldown (up to 10/cycle, items from the last 48h whose `summary_error` matches "does not exist or you do not have access to it")
 5. Frontend fetches from content search API with server-side filtering and faceted aggregations
 6. Ad-hoc content: user pastes URL in Add Content page → backend detects type → preview metadata → confirm triggers background pipeline (same as polling but for individual items)
 
@@ -78,7 +78,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 ### Elasticsearch Indices
 
 - `aitube-subscriptions` — Feed subscriptions (youtube_channel, podcast, rss)
-- `aitube-content-items` — All content with full-text search, facets on type/subscription_id/consumed/viewed/user_interest
+- `aitube-content-items` — All content with full-text search, facets on type/subscription_id/consumed/viewed/user_interest. `summary_error`/`summary_failed_at` record the last summarization failure (cleared on success) so failed summaries can be found and retried.
 - `aitube-playback-state` — Playback position tracking
 - `aitube-quarantine-events` — Audit log of post-ingest quarantines (one row per item; subsequent calls are no-ops)
 - `aitube-summary-evals` — Haiku-vs-Hermes summarization eval records (both summaries, format violations, latency, judge scores/winner)

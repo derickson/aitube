@@ -121,11 +121,11 @@ async def compare_engines(item: dict[str, Any]) -> dict[str, Any]:
     )
 
     t0 = time.perf_counter()
-    haiku = await summarize_via_haiku(prompt, title)
+    haiku, _haiku_error = await summarize_via_haiku(prompt, title)
     haiku_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     t0 = time.perf_counter()
-    hermes_raw = await run_oneshot(prompt, model=settings.hermes_model)
+    hermes_raw, _hermes_error = await run_oneshot(prompt, model=settings.hermes_model)
     hermes_ms = round((time.perf_counter() - t0) * 1000, 1)
     hermes = _postprocess_summary(hermes_raw) if hermes_raw else None
 

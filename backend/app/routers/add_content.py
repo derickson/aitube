@@ -421,18 +421,21 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
 
     # Generate summary
     summary = ""
+    summary_error = None
     if transcript_text:
         try:
-            summary = await summarize_content(
+            summary, summary_error = await summarize_content(
                 title=title,
                 content_type="podcast_episode",
                 transcript_text=transcript_text,
                 description="",
                 author=author or "",
                 transcript_chunks=transcript_chunks,
-            ) or ""
+            )
+            summary = summary or ""
         except Exception as e:
             logger.warning("Failed to summarize podcast %s: %s", url, e)
+            summary_error = str(e)[:300]
 
     doc = {
         "subscription_id": "adhoc",
@@ -457,6 +460,9 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
             "extras": {"podcast_name": meta.get("podcast_name"), "enclosure_url": url},
         },
     }
+    if not summary and summary_error:
+        doc["summary_error"] = summary_error
+        doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
 
     es = get_es_client()
     doc_id = str(uuid.uuid4())
@@ -514,17 +520,20 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
 
     # Generate summary
     summary = ""
+    summary_error = None
     if markdown:
         try:
-            summary = await summarize_content(
+            summary, summary_error = await summarize_content(
                 title=title,
                 content_type="article",
                 transcript_text=markdown,
                 description="",
                 author="",
-            ) or ""
+            )
+            summary = summary or ""
         except Exception as e:
             logger.warning("Failed to summarize article %s: %s", url, e)
+            summary_error = str(e)[:300]
 
     doc = {
         "subscription_id": "adhoc",
@@ -544,6 +553,9 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
         "content_dlp_cache_id": cache_id,
         "metadata": {"description": "", "author": None, "tags": [], "extras": {}},
     }
+    if not summary and summary_error:
+        doc["summary_error"] = summary_error
+        doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
 
     es = get_es_client()
     doc_id = str(uuid.uuid4())

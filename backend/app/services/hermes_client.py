@@ -6,7 +6,7 @@ prompt is piped over SSH stdin and read back remotely via "$(cat)", so it needs 
 shell escaping regardless of size or content.
 
 Used by summarizer.py to offload summarization off Claude Haiku. Any failure here
-returns None so the caller can fall back to Haiku.
+returns a None summary (with an error string) so the caller can fall back to Haiku.
 """
 
 import asyncio
@@ -37,14 +37,17 @@ def _build_remote_command(use_model: str) -> str:
     return " ".join(parts)
 
 
-async def run_oneshot(prompt: str, *, model: str | None = None) -> str | None:
-    """Send `prompt` to `hermes -z` over SSH; return the response text, or None on any failure.
+async def run_oneshot(prompt: str, *, model: str | None = None) -> tuple[str | None, str | None]:
+    """Send `prompt` to `hermes -z` over SSH; return (response_text, error).
 
-    None is returned (not raised) for every failure mode — disabled, connect/timeout,
-    non-zero exit, empty output — so summarizer can fall back to Haiku cleanly.
+    response_text is None (not raised) for every failure mode — disabled, connect/timeout,
+    non-zero exit, empty output — so summarizer can fall back to Haiku cleanly. `error` carries
+    a short description of what went wrong (e.g. the ssh/hermes stderr, which for a quota
+    cooldown looks like "HTTP 404: The model <model> does not exist or you do not have access
+    to it."), so callers can persist it for later triage/retry.
     """
     if not settings.hermes_enabled or not settings.hermes_ssh_target:
-        return None
+        return None, None
 
     use_model = model if model is not None else settings.hermes_model
     remote_cmd = _build_remote_command(use_model)
@@ -76,18 +79,17 @@ async def run_oneshot(prompt: str, *, model: str | None = None) -> str | None:
             )
         except asyncio.TimeoutError:
             logger.warning("Hermes timed out after %ds", settings.hermes_timeout_seconds)
-            return None
+            return None, f"timed out after {settings.hermes_timeout_seconds}s"
         except OSError as e:
             logger.warning("Hermes ssh spawn failed: %s", e)
-            return None
+            return None, f"ssh spawn failed: {e}"
 
     if proc.returncode != 0:
-        logger.warning(
-            "Hermes ssh exited %s: %s",
-            proc.returncode,
-            stderr.decode(errors="replace")[:300],
-        )
-        return None
+        err_text = stderr.decode(errors="replace")[:300].strip()
+        logger.warning("Hermes ssh exited %s: %s", proc.returncode, err_text)
+        return None, err_text or f"ssh exited {proc.returncode}"
 
     text = stdout.decode(errors="replace").strip()
-    return text or None
+    if not text:
+        return None, "empty response"
+    return text, None

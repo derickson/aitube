@@ -213,7 +213,7 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
     if source_text or doc.get("metadata", {}).get("description"):
         try:
             from backend.app.services.summarizer import summarize_content
-            summary = await summarize_content(
+            summary, summary_error = await summarize_content(
                 title=doc["title"],
                 content_type=doc["type"],
                 transcript_text=source_text,
@@ -223,6 +223,9 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
             )
             if summary:
                 doc["summary"] = summary
+            elif summary_error:
+                doc["summary_error"] = summary_error[:500]
+                doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
             logger.warning("Failed to summarize %s: %s", doc.get("title", url), e)
 
@@ -629,7 +632,7 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             if source_text or doc.get("metadata", {}).get("description"):
                 try:
                     from backend.app.services.summarizer import summarize_content
-                    summary = await summarize_content(
+                    summary, summary_error = await summarize_content(
                         title=doc["title"],
                         content_type=doc["type"],
                         transcript_text=source_text,
@@ -639,6 +642,9 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                     )
                     if summary:
                         doc["summary"] = summary
+                    elif summary_error:
+                        doc["summary_error"] = summary_error[:500]
+                        doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
                 except Exception as e:
                     logger.warning("Failed to summarize %s: %s", doc["title"], e)
 
@@ -856,7 +862,7 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
             description = src.get("metadata", {}).get("description", "")
             author = src.get("metadata", {}).get("author", "")
 
-            new_summary = await summarize_content(
+            new_summary, new_summary_error = await summarize_content(
                 title=title,
                 content_type="video",
                 transcript_text=transcript_text,
@@ -866,6 +872,11 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
             )
             if new_summary:
                 update_fields["summary"] = new_summary
+                update_fields["summary_error"] = None
+                update_fields["summary_failed_at"] = None
+            elif new_summary_error:
+                update_fields["summary_error"] = new_summary_error[:500]
+                update_fields["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
 
             # Also backfill duration if missing
             if not hit["_source"].get("duration_seconds") and meta.get("duration"):
@@ -948,7 +959,7 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
             description = src.get("metadata", {}).get("description", "")
             author = src.get("metadata", {}).get("author", "")
 
-            summary = await summarize_content(
+            summary, summary_error = await summarize_content(
                 title=title,
                 content_type=content_type,
                 transcript_text=source_text,
@@ -960,12 +971,21 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
                 await es.update(
                     index=CONTENT_ITEMS_INDEX,
                     id=doc_id,
-                    body={"doc": {"summary": summary}},
+                    body={"doc": {"summary": summary, "summary_error": None, "summary_failed_at": None}},
                 )
                 backfilled += 1
                 logger.info("Backfill: generated summary for '%s' (%s)", title[:60], doc_id)
             else:
-                logger.warning("Backfill: summarize_content returned None for '%s'", title[:60])
+                logger.warning("Backfill: summarize_content returned None for '%s' (%s)", title[:60], summary_error)
+                if summary_error:
+                    await es.update(
+                        index=CONTENT_ITEMS_INDEX,
+                        id=doc_id,
+                        body={"doc": {
+                            "summary_error": summary_error[:500],
+                            "summary_failed_at": datetime.now(timezone.utc).isoformat(),
+                        }},
+                    )
 
         except Exception as e:
             logger.warning("Backfill summary: failed for '%s' (%s): %s", title[:60], doc_id, e)
@@ -973,6 +993,118 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
     if backfilled:
         logger.info("Backfilled summaries for %d item(s)", backfilled)
     return backfilled
+
+
+# Hermes reports this when the GPT quota is exhausted and the model is in cooldown,
+# e.g. "HTTP 404: The model gpt-5.4-mini does not exist or you do not have access to it."
+# The model name changes over time, so match only the fixed suffix of the message.
+_RETRYABLE_SUMMARY_ERROR_RE = re.compile(
+    r"does not exist or you do not have access to it", re.IGNORECASE
+)
+
+
+def _is_retryable_summary_error(error: str | None) -> bool:
+    return bool(error) and bool(_RETRYABLE_SUMMARY_ERROR_RE.search(error))
+
+
+async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
+    """Retry summaries that previously failed with a Hermes quota-cooldown error.
+
+    Targets items from the last `hours` hours whose summary failed with a message
+    matching `_RETRYABLE_SUMMARY_ERROR_RE` (Hermes model temporarily inaccessible),
+    which usually clears once the quota cooldown ends. Processes at most `limit`
+    items per cycle. Returns the number of summaries successfully recovered.
+    """
+    from backend.app.services.summarizer import summarize_content
+
+    es = get_es_client()
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "must": [
+                        {"range": {"discovered_at": {"gte": f"now-{hours}h"}}},
+                        {"exists": {"field": "summary_error"}},
+                    ],
+                }
+            },
+            "_source": [
+                "title", "url", "type", "transcript", "content_markdown",
+                "metadata", "summary", "summary_error",
+            ],
+            "size": 200,
+        },
+    )
+
+    candidates = []
+    for hit in resp["hits"]["hits"]:
+        src = hit["_source"]
+        if src.get("summary") or not _is_retryable_summary_error(src.get("summary_error")):
+            continue
+        transcript = src.get("transcript")
+        has_transcript = isinstance(transcript, dict) and transcript.get("text")
+        has_content = bool(src.get("content_markdown"))
+        if has_transcript or has_content:
+            candidates.append(hit)
+
+    if not candidates:
+        return 0
+
+    retried = 0
+    for hit in candidates[:limit]:
+        doc_id = hit["_id"]
+        src = hit["_source"]
+        title = src.get("title", "?")
+        content_type = src.get("type", "article")
+
+        try:
+            transcript = src.get("transcript")
+            transcript_text = ""
+            transcript_chunks = None
+            if isinstance(transcript, dict):
+                transcript_text = transcript.get("text", "")
+                if transcript.get("chunks"):
+                    transcript_chunks = transcript["chunks"]
+
+            source_text = transcript_text or src.get("content_markdown", "")
+            description = src.get("metadata", {}).get("description", "")
+            author = src.get("metadata", {}).get("author", "")
+
+            summary, summary_error = await summarize_content(
+                title=title,
+                content_type=content_type,
+                transcript_text=source_text,
+                description=description,
+                author=author,
+                transcript_chunks=transcript_chunks,
+            )
+            if summary:
+                await es.update(
+                    index=CONTENT_ITEMS_INDEX,
+                    id=doc_id,
+                    body={"doc": {"summary": summary, "summary_error": None, "summary_failed_at": None}},
+                )
+                retried += 1
+                logger.info("Retry: recovered summary for '%s' (%s)", title[:60], doc_id)
+            elif summary_error and summary_error != src.get("summary_error"):
+                # Still failing, but record the latest error (e.g. cooldown cleared but
+                # a different failure occurred) so the next retry pass re-evaluates it fresh.
+                await es.update(
+                    index=CONTENT_ITEMS_INDEX,
+                    id=doc_id,
+                    body={"doc": {
+                        "summary_error": summary_error[:500],
+                        "summary_failed_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                )
+
+        except Exception as e:
+            logger.warning("Retry summary: failed for '%s' (%s): %s", title[:60], doc_id, e)
+
+    if retried:
+        logger.info("Retried and recovered %d failed summary(ies)", retried)
+    return retried
 
 
 async def poll_all_active() -> dict[str, list[str]]:
@@ -1021,6 +1153,9 @@ async def poll_all_active() -> dict[str, list[str]]:
 
     # Generate summaries for recent items that are missing them
     await backfill_missing_summaries()
+
+    # Retry summaries that failed due to a Hermes GPT-quota cooldown
+    await retry_failed_summaries()
 
     content_cache.invalidate()
     return results
