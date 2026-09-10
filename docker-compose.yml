@@ -14,7 +14,7 @@ services:
       - HERMES_ENABLED=${HERMES_ENABLED:-false}
       - HERMES_SSH_TARGET=${HERMES_SSH_TARGET:-root@187.77.195.232}
       - HERMES_SSH_OPTS=-i /run/secrets/hermes_key -o UserKnownHostsFile=/run/secrets/hermes_known_hosts
-      - HERMES_MODEL=${HERMES_MODEL:-gpt-5.4-mini}
+      - HERMES_MODEL=${HERMES_MODEL:-gpt-5.5}
       - HERMES_PROFILE=${HERMES_PROFILE:-aitube}
     volumes:
       - ~/.ssh/hermes_ed25519:/run/secrets/hermes_key:ro

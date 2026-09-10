@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     hermes_enabled: bool = False
     hermes_ssh_target: str = "hermes"      # ssh destination: ~/.ssh/config alias, or user@host
     hermes_ssh_opts: str = ""              # extra ssh args, e.g. "-i /run/secrets/hermes_key -p 22"
-    hermes_model: str = "gpt-5.4-mini"     # `-m` model for summaries; "" = Hermes profile default
+    hermes_model: str = "gpt-5.5"          # `-m` model for summaries; "" = Hermes profile default
     hermes_profile: str = "aitube"         # `-p` dedicated neutral profile (no "Rex" persona)
     hermes_timeout_seconds: int = 120
 
