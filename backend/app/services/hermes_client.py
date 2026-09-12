@@ -6,11 +6,14 @@ prompt is piped over SSH stdin and read back remotely via "$(cat)", so it needs 
 shell escaping regardless of size or content.
 
 Used by summarizer.py to offload summarization off Claude Haiku. Any failure here
-returns a None summary (with an error string) so the caller can fall back to Haiku.
+returns a None summary (with an error string) so the caller can fall back to Haiku —
+including an upstream API error, which `hermes -z` reports on stdout with a zero exit
+status rather than as a non-zero exit.
 """
 
 import asyncio
 import logging
+import re
 import shlex
 
 import elasticapm
@@ -18,6 +21,41 @@ import elasticapm
 from backend.app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# `hermes -z` prints upstream API errors to *stdout* and still exits 0, e.g.
+#   HTTP 404: The model `gpt-5.5` does not exist or you do not have access to it.
+#   HTTP 400: {"detail":"The '<model>' model is not supported ..."}
+# so a zero exit status alone does not mean we got a summary. Without this check
+# the error text is returned as the response and stored verbatim as the summary,
+# which also hides the item from retry_failed_summaries (summary_error stays unset).
+# Anchored: a real summary may legitimately *discuss* an HTTP status code.
+_API_ERROR_RE = re.compile(r"^HTTP \d{3}\b")
+
+# Not every error payload announces itself with a status line — one stored summary
+# read "API call failed after 3 retries: HTTP 503: Service Unavailable". Length is
+# the reliable discriminator. Measured over all 3,233 summaries in the index: the
+# shortest legitimate summary is 307 chars, every observed error payload is under
+# ~120, and this threshold rejects exactly one stored summary — the 503 above.
+# Deliberately a length check and not a format check: gating on the prompt's
+# "exactly 5 bullets" would reject 7.7% of real summaries for no added coverage.
+_MIN_SUMMARY_CHARS = 200
+
+
+def looks_like_error_response(text: str) -> str | None:
+    """Return why `text` cannot be a summary, or None if it looks like one.
+
+    Hermes reports upstream failures in-band (stdout, exit 0), so the response body
+    is the only signal that anything went wrong. Shared with
+    `scripts/repair_error_summaries.py` so detection and repair can't drift apart.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return "empty response"
+    if _API_ERROR_RE.match(stripped):
+        return stripped[:300]
+    if len(stripped) < _MIN_SUMMARY_CHARS:
+        return f"response too short to be a summary ({len(stripped)} chars): {stripped[:200]}"
+    return None
 
 
 def _build_remote_command(use_model: str) -> str:
@@ -90,6 +128,8 @@ async def run_oneshot(prompt: str, *, model: str | None = None) -> tuple[str | N
         return None, err_text or f"ssh exited {proc.returncode}"
 
     text = stdout.decode(errors="replace").strip()
-    if not text:
-        return None, "empty response"
+    failure = looks_like_error_response(text)
+    if failure:
+        logger.warning("Hermes returned no usable summary (exit 0): %s", failure[:200])
+        return None, failure
     return text, None

@@ -1006,11 +1006,16 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
     return backfilled
 
 
-# Hermes reports this when the GPT quota is exhausted and the model is in cooldown,
-# e.g. "HTTP 404: The model gpt-5.4-mini does not exist or you do not have access to it."
-# The model name changes over time, so match only the fixed suffix of the message.
+# Hermes reports a quota cooldown as an upstream API error, e.g.
+# "HTTP 404: The model gpt-5.4-mini does not exist or you do not have access to it."
+# The model name and the exact wording change over time (cooldowns have also shown up as
+# "HTTP 400: ... is not supported when using Codex with a ChatGPT account" and
+# "API call failed after 3 retries: HTTP 503: Service Unavailable"), so match the fixed
+# suffix of the known message *or* any HTTP status anywhere in the captured error.
+# Unanchored, unlike hermes_client._API_ERROR_RE: this only ever sees error strings,
+# never a summary that might legitimately mention a status code.
 _RETRYABLE_SUMMARY_ERROR_RE = re.compile(
-    r"does not exist or you do not have access to it", re.IGNORECASE
+    r"does not exist or you do not have access to it|\bHTTP \d{3}\b", re.IGNORECASE
 )
 
 

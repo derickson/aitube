@@ -21,6 +21,12 @@ make docker-start      # Start Docker containers
 uv run python -m backend.scripts.poll_feeds
 ```
 
+**Repairing summaries that stored an API error payload:**
+```bash
+uv run python -m backend.scripts.repair_error_summaries --dry-run
+HERMES_ENABLED=true uv run python -m backend.scripts.repair_error_summaries
+```
+
 **Repairing feed markup in already-indexed docs:**
 ```bash
 uv run python -m backend.scripts.clean_feed_markup --dry-run   # report only
@@ -45,7 +51,7 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
   - `content_dlp.py` — HTTP client to content-dlp service on host (port 7055), not subprocess calls
   - `youtube_captions.py` — yt-dlp for captions + livestream detection (via `is_live`/`was_live`)
   - `summarizer.py` — content summaries with bullet-point breakdowns and timestamps. Tries Hermes (GPT-5.4 mini via SSH) first when `HERMES_ENABLED=true`, falling back to Claude Haiku on any failure. Both engines run the identical prompt from `_build_summary_prompt`. `summarize_content()` returns `(summary, error)`; on total failure the item is stored with `summary_error`/`summary_failed_at` instead of a summary, so `feed_poller.retry_failed_summaries()` can find and retry it later.
-  - `hermes_client.py` — offloads a prompt to the Hermes agent on a VPS via `ssh … 'hermes -p aitube -t "" -m gpt-5.4-mini -z "$(cat)"'` (prompt piped over stdin, read remotely with `"$(cat)"` so it needs no escaping). `run_oneshot()` returns `(text, error)`; text is None on any failure (disabled, timeout, non-zero exit, empty output) so the caller falls back to Haiku, and `error` carries the raw failure reason (e.g. the ssh/hermes stderr) for persistence.
+  - `hermes_client.py` — offloads a prompt to the Hermes agent on a VPS via `ssh … 'hermes -p aitube -t "" -m gpt-5.4-mini -z "$(cat)"'` (prompt piped over stdin, read remotely with `"$(cat)"` so it needs no escaping). `run_oneshot()` returns `(text, error)`; text is None on any failure (disabled, timeout, non-zero exit, empty output, **upstream API error**) so the caller falls back to Haiku, and `error` carries the raw failure reason for persistence. **Important:** `hermes -z` prints upstream API errors to *stdout* and still exits 0 (e.g. "HTTP 404: The model `gpt-5.5` does not exist or you do not have access to it.", "API call failed after 3 retries: HTTP 503: Service Unavailable"), so a zero exit status is not proof of success. Without a body check the error text is stored as the item's summary, which also hides the item from `retry_failed_summaries` (it keys off `summary_error`, which stays unset). `looks_like_error_response()` is the gate: it rejects an empty body, a *leading* `HTTP <status>` line (anchored — a real summary may discuss status codes), and anything under `_MIN_SUMMARY_CHARS` (200). The length check is load-bearing, since not every error payload starts with a status line. Measured over all 3,233 indexed summaries: shortest legitimate summary 307 chars, every error payload under ~120, zero false positives. It is deliberately **not** a format check — gating on the prompt's "exactly 5 bullets" would reject 7.7% of real summaries (102 have no bullets at all). `scripts/repair_error_summaries.py` imports the same predicate so detection and repair can't drift.
   - `summary_eval.py` — head-to-head Haiku vs Hermes: runs both engines on one item, applies deterministic format checks, and scores them with a neutral Claude Sonnet judge (blind + A/B-randomized). Backs `scripts/eval_summarizers.py`.
   - `feed_text.py` — `clean_feed_text()`: the single sanitizer for free text pulled out of feed XML. Unwraps CDATA, resolves HTML entities, strips markup, drops control chars. Needed because `<title>` is an RCDATA element for BeautifulSoup's HTML parser, so a `<![CDATA[...]]>` section inside it arrives as literal text (elsewhere bs4 unwraps it into a `CData` node). Applied in `_parse_rss_feed_entry`, `_parse_youtube_feed_entry`, `_parse_dlp_item` (the last gate before indexing, so podcast items from content-dlp are covered too) and `url_resolver`.
   - `metadata_extractor.py` — Claude Haiku for extracting podcast titles from transcripts and article metadata from scraped markdown
@@ -66,7 +72,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 1. Cron runs `poll_feeds.py` every 30 minutes
 2. For each subscription: fetch feed XML → parse entries → filter by age → dedup against ES
 3. Per new item: scrape content (RSS) or fetch captions (YouTube) → cleanup markdown → generate AI summary → index to ES
-4. Post-poll: deduplicate content items by URL, backfill missing transcripts (up to 5/cycle), backfill missing summaries (up to 10/cycle), retry summaries that failed on a Hermes GPT-quota cooldown (up to 10/cycle, items from the last 48h whose `summary_error` matches "does not exist or you do not have access to it")
+4. Post-poll: deduplicate content items by URL, backfill missing transcripts (up to 5/cycle), backfill missing summaries (up to 10/cycle), retry summaries that failed on a Hermes GPT-quota cooldown (up to 10/cycle, items from the last 48h whose `summary_error` matches "does not exist or you do not have access to it" or starts with an `HTTP <status>` line)
 5. Frontend fetches from content search API with server-side filtering and faceted aggregations
 6. Ad-hoc content: user pastes URL in Add Content page → backend detects type → preview metadata → confirm triggers background pipeline (same as polling but for individual items)
 
