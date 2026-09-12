@@ -21,6 +21,12 @@ make docker-start      # Start Docker containers
 uv run python -m backend.scripts.poll_feeds
 ```
 
+**Repairing feed markup in already-indexed docs:**
+```bash
+uv run python -m backend.scripts.clean_feed_markup --dry-run   # report only
+uv run python -m backend.scripts.clean_feed_markup             # rewrite title/description/author
+```
+
 **Evaluating summarizers (Haiku vs Hermes/GPT-5.4 mini):**
 ```bash
 HERMES_ENABLED=true uv run python -m backend.scripts.eval_summarizers --n 30
@@ -41,6 +47,7 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
   - `summarizer.py` — content summaries with bullet-point breakdowns and timestamps. Tries Hermes (GPT-5.4 mini via SSH) first when `HERMES_ENABLED=true`, falling back to Claude Haiku on any failure. Both engines run the identical prompt from `_build_summary_prompt`. `summarize_content()` returns `(summary, error)`; on total failure the item is stored with `summary_error`/`summary_failed_at` instead of a summary, so `feed_poller.retry_failed_summaries()` can find and retry it later.
   - `hermes_client.py` — offloads a prompt to the Hermes agent on a VPS via `ssh … 'hermes -p aitube -t "" -m gpt-5.4-mini -z "$(cat)"'` (prompt piped over stdin, read remotely with `"$(cat)"` so it needs no escaping). `run_oneshot()` returns `(text, error)`; text is None on any failure (disabled, timeout, non-zero exit, empty output) so the caller falls back to Haiku, and `error` carries the raw failure reason (e.g. the ssh/hermes stderr) for persistence.
   - `summary_eval.py` — head-to-head Haiku vs Hermes: runs both engines on one item, applies deterministic format checks, and scores them with a neutral Claude Sonnet judge (blind + A/B-randomized). Backs `scripts/eval_summarizers.py`.
+  - `feed_text.py` — `clean_feed_text()`: the single sanitizer for free text pulled out of feed XML. Unwraps CDATA, resolves HTML entities, strips markup, drops control chars. Needed because `<title>` is an RCDATA element for BeautifulSoup's HTML parser, so a `<![CDATA[...]]>` section inside it arrives as literal text (elsewhere bs4 unwraps it into a `CData` node). Applied in `_parse_rss_feed_entry`, `_parse_youtube_feed_entry`, `_parse_dlp_item` (the last gate before indexing, so podcast items from content-dlp are covered too) and `url_resolver`.
   - `metadata_extractor.py` — Claude Haiku for extracting podcast titles from transcripts and article metadata from scraped markdown
   - `elasticsearch.py` — Async ES client with index mappings and lifecycle
 - **Config** (`backend/app/config.py`): Pydantic Settings reading from `.env`. Key: `content_dlp_url` defaults to localhost:7055, overridden to `host.docker.internal:7055` in Docker via `docker-compose.yml` environment block.

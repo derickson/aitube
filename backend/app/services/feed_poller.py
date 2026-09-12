@@ -23,6 +23,7 @@ from backend.app.services.elasticsearch import (
     detect_engagement_pipeline,
     get_es_client,
 )
+from backend.app.services.feed_text import clean_feed_text
 
 from dateutil import parser as dateparser
 
@@ -100,7 +101,7 @@ def _parse_dlp_item(
         "subscription_id": subscription.id,
         "external_id": raw.get("content_id", raw.get("url", "")),
         "type": content_type,
-        "title": raw.get("title", "Untitled"),
+        "title": clean_feed_text(raw.get("title")) or "Untitled",
         "url": raw.get("url", ""),
         "published_at": published_at,
         "discovered_at": datetime.now(timezone.utc).isoformat(),
@@ -113,8 +114,8 @@ def _parse_dlp_item(
         "content_markdown": raw.get("markdown", ""),
         "content_dlp_cache_id": raw.get("content_id", ""),
         "metadata": {
-            "description": raw.get("description", ""),
-            "author": raw.get("author"),
+            "description": clean_feed_text(raw.get("description")),
+            "author": clean_feed_text(raw.get("author")) or None,
             "tags": raw.get("tags", []),
             "extras": raw.get("extras", {}),
         },
@@ -236,7 +237,7 @@ def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any] | None:
     """Convert a YouTube Atom feed <entry> into a content-dlp-like dict.
     Returns None if the entry is a YouTube Short."""
     video_id_tag = entry.find("yt:videoid") or entry.find("videoid")
-    video_id = video_id_tag.get_text(strip=True) if video_id_tag else ""
+    video_id = clean_feed_text(video_id_tag.get_text(), strip_html=False) if video_id_tag else ""
 
     # Check if this is a Short via the link href
     link_tag = entry.find("link", rel="alternate")
@@ -250,10 +251,11 @@ def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any] | None:
         return None
 
     title_tag = entry.find("title")
-    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+    title = clean_feed_text(title_tag.get_text()) if title_tag else ""
+    title = title or "Untitled"
 
     published_tag = entry.find("published")
-    published = published_tag.get_text(strip=True) if published_tag else None
+    published = clean_feed_text(published_tag.get_text(), strip_html=False) if published_tag else None
 
     thumbnail = entry.find("media:thumbnail") or entry.find("thumbnail")
     thumb_url = thumbnail.get("url", "") if thumbnail else ""
@@ -261,14 +263,14 @@ def _parse_youtube_feed_entry(entry: Any) -> dict[str, Any] | None:
         thumb_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
     desc_tag = entry.find("media:description") or entry.find("description")
-    description = desc_tag.get_text(strip=True) if desc_tag else ""
+    description = clean_feed_text(desc_tag.get_text()) if desc_tag else ""
 
     author_tag = entry.find("author")
     author = ""
     if author_tag:
         name_tag = author_tag.find("name")
         if name_tag:
-            author = name_tag.get_text(strip=True)
+            author = clean_feed_text(name_tag.get_text())
 
     return {
         "content_id": f"yt_{video_id}",
@@ -337,8 +339,12 @@ async def _fetch_youtube_channel_feed(channel_url: str) -> list[dict[str, Any]]:
 
 def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
     """Convert an RSS/Atom feed entry into a content-dlp-like dict."""
+    # Note: <title> is an RCDATA element for the HTML parser, so a CDATA section
+    # inside it arrives as literal "<![CDATA[...]]>" text rather than a CData
+    # node — clean_feed_text unwraps it (see feed_text).
     title_tag = item.find("title")
-    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
+    title = clean_feed_text(title_tag.get_text()) if title_tag else ""
+    title = title or "Untitled"
 
     # RSS: <link> text, Atom: <link href="">
     # Note: BeautifulSoup's HTML parser treats <link> as void/self-closing,
@@ -346,32 +352,37 @@ def _parse_rss_feed_entry(item: Any, feed_url: str) -> dict[str, Any]:
     link_tag = item.find("link")
     url = ""
     if link_tag:
-        url = link_tag.get("href", "") or link_tag.get_text(strip=True)
+        url = clean_feed_text(link_tag.get("href", "") or link_tag.get_text(), strip_html=False)
 
     # GUID as external ID, fallback to URL
     guid_tag = item.find("guid") or item.find("id")
-    guid = guid_tag.get_text(strip=True) if guid_tag else url
+    # Hash the raw guid text, not the cleaned one: external_id is the dedup key
+    # for already-ingested items and must stay stable across parser changes.
+    guid_raw = guid_tag.get_text(strip=True) if guid_tag else url
+    guid = clean_feed_text(guid_raw, strip_html=False)
 
     # If link parsing failed, use guid as URL if it looks like one
     if not url and guid and guid.startswith("http"):
         url = guid
     # Create a stable short ID
     import hashlib
-    external_id = f"rss_{hashlib.md5(guid.encode()).hexdigest()[:12]}"
+    external_id = f"rss_{hashlib.md5(guid_raw.encode()).hexdigest()[:12]}"
 
     pub_tag = item.find("pubdate") or item.find("pubDate") or item.find("published") or item.find("updated")
-    published = pub_tag.get_text(strip=True) if pub_tag else None
+    published = clean_feed_text(pub_tag.get_text(), strip_html=False) if pub_tag else None
 
     desc_tag = item.find("description") or item.find("summary") or item.find("content")
-    description = desc_tag.get_text(strip=True) if desc_tag else ""
+    # Unwrap CDATA/entities but keep markup for now, so the <img> scan below can
+    # still see it; the stored description is stripped of markup afterwards.
+    desc_markup = clean_feed_text(desc_tag.get_text(), strip_html=False) if desc_tag else ""
 
-    # Extract inline <img src="..."> from description text (HTML-escaped in RSS becomes literal text)
+    # Extract inline <img src="..."> from description markup (HTML-escaped in RSS becomes literal text)
     desc_img = ""
-    img_match = re.search(r'<img[^>]+src=["\']?(https?://[^\s"\'>\)]+)', description)
+    img_match = re.search(r'<img[^>]+src=["\']?(https?://[^\s"\'>\)]+)', desc_markup)
     if img_match:
         desc_img = img_match.group(1)
-        # Clean the img tag text out of the plain-text description
-        description = re.sub(r'<img[^>]*>', '', description).strip()
+
+    description = clean_feed_text(desc_markup)
 
     # Look for images — try media:thumbnail, media:content, enclosure, then description img
     thumbnail = ""

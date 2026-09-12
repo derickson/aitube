@@ -17,6 +17,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from backend.app.services import content_dlp
+from backend.app.services.feed_text import clean_feed_text
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +105,9 @@ def _extract_html_metadata(html: str) -> dict:
     # Title: og:title > <title>
     og_title = soup.find("meta", property="og:title")
     if og_title:
-        meta["name"] = og_title.get("content", "")
+        meta["name"] = clean_feed_text(og_title.get("content", ""))
     elif soup.title:
-        meta["name"] = soup.title.string or ""
+        meta["name"] = clean_feed_text(soup.title.string or "")
 
     # Description: og:description > meta description
     og_desc = soup.find("meta", property="og:description")
@@ -135,10 +136,10 @@ def _parse_feed_metadata(body: str) -> dict:
     if channel:
         title_tag = channel.find("title", recursive=False)
         if title_tag:
-            meta["name"] = _strip_cdata(title_tag.get_text(strip=True))
+            meta["name"] = clean_feed_text(title_tag.get_text())
         desc_tag = channel.find("description", recursive=False)
         if desc_tag:
-            meta["description"] = _strip_cdata(desc_tag.get_text(strip=True))
+            meta["description"] = clean_feed_text(desc_tag.get_text())
         img = channel.find("image")
         if img:
             img_url = img.find("url")
@@ -154,20 +155,12 @@ def _parse_feed_metadata(body: str) -> dict:
     if feed_tag and "name" not in meta:
         title_tag = feed_tag.find("title", recursive=False)
         if title_tag:
-            meta["name"] = _strip_cdata(title_tag.get_text(strip=True))
+            meta["name"] = clean_feed_text(title_tag.get_text())
         sub_tag = feed_tag.find("subtitle", recursive=False)
         if sub_tag:
-            meta["description"] = _strip_cdata(sub_tag.get_text(strip=True))
+            meta["description"] = clean_feed_text(sub_tag.get_text())
 
     return meta
-
-
-def _strip_cdata(text: str) -> str:
-    """Remove CDATA wrappers that the HTML parser doesn't handle."""
-    s = text.strip()
-    if s.startswith("<![CDATA[") and s.endswith("]]>"):
-        s = s[9:-3].strip()
-    return s
 
 
 def _extract_sample_items(body: str, limit: int = 3) -> list[dict]:
@@ -180,7 +173,7 @@ def _extract_sample_items(body: str, limit: int = 3) -> list[dict]:
         title = item.find("title")
         pub = item.find("pubdate") or item.find("pubDate")
         items.append({
-            "title": _strip_cdata(title.get_text(strip=True)) if title else "Untitled",
+            "title": (clean_feed_text(title.get_text()) if title else "") or "Untitled",
             "published": pub.get_text(strip=True) if pub else None,
         })
 
@@ -190,7 +183,7 @@ def _extract_sample_items(body: str, limit: int = 3) -> list[dict]:
             title = entry.find("title")
             pub = entry.find("published") or entry.find("updated")
             items.append({
-                "title": _strip_cdata(title.get_text(strip=True)) if title else "Untitled",
+                "title": (clean_feed_text(title.get_text()) if title else "") or "Untitled",
                 "published": pub.get_text(strip=True) if pub else None,
             })
 
