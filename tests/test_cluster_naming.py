@@ -80,7 +80,9 @@ async def test_name_clusters_parses_and_truncates(monkeypatch):
     monkeypatch.setattr(settings, "hermes_enabled", True)
 
     async def _fake(prompt, **kw):
-        return '```json\n{"c00": "Local LLM Tooling", "c01": "Way Too Many Words In This Title"}\n```'
+        # run_oneshot returns (text, error) — a bare string here silently made
+        # _name_clusters_via_hermes fall back to term labels.
+        return '```json\n{"c00": "Local LLM Tooling", "c01": "Way Too Many Words In This Title"}\n```', None
 
     monkeypatch.setattr("backend.app.services.hermes_client.run_oneshot", _fake)
     names = await clustering._name_clusters_via_hermes(
