@@ -1231,6 +1231,11 @@ main:has(.flyout-open) {
   margin-bottom: 0;
 }
 
+.flyout-summary-error .flyout-summary-text {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
 .flyout-summary-text strong {
   font-weight: 600;
 }

@@ -13,6 +13,7 @@ import anthropic
 
 from backend.app.config import settings
 from backend.app.services.anthropic_client import get_anthropic_client, traced_messages_create
+from backend.app.services.summary_errors import MIN_SOURCE_CHARS, SummaryErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +87,16 @@ def _postprocess_summary(summary: str) -> str:
     return summary
 
 
-async def summarize_via_haiku(prompt: str, title: str = "") -> tuple[str | None, str | None]:
+async def summarize_via_haiku(
+    prompt: str, title: str = ""
+) -> tuple[str | None, str | None, SummaryErrorCode | None]:
     """Run the summary prompt through Claude Haiku, with retries on rate limits.
 
-    Returns (summary, error). summary is None if Anthropic is unconfigured or fails,
-    in which case error carries a short description of why.
+    Returns (summary, error, error_code). summary is None if Anthropic is unconfigured
+    or fails, in which case error carries a short description of why.
     """
     if not settings.anthropic_api_key:
-        return None, "anthropic not configured"
+        return None, "anthropic not configured", SummaryErrorCode.NOT_CONFIGURED
 
     client = get_anthropic_client()
     max_retries = 3
@@ -106,8 +109,14 @@ async def summarize_via_haiku(prompt: str, title: str = "") -> tuple[str | None,
                 messages=[{"role": "user", "content": prompt}],
             )
             summary = _postprocess_summary(response.content[0].text)
+            from backend.app.services.hermes_client import looks_like_error_response
+            failure = looks_like_error_response(summary)
+            if failure:
+                detail, code = failure
+                logger.warning("Haiku returned no usable summary for %s: %s", title[:50], detail[:200])
+                return None, detail, code
             logger.info("Generated summary via Haiku for: %s (%d chars)", title[:50], len(summary))
-            return summary, None
+            return summary, None, None
 
         except anthropic.RateLimitError:
             if attempt < max_retries - 1:
@@ -117,13 +126,13 @@ async def summarize_via_haiku(prompt: str, title: str = "") -> tuple[str | None,
             else:
                 logger.warning("Rate limited (429) summarizing %s, all %d attempts exhausted",
                                title[:50], max_retries)
-                return None, "rate limited (429), retries exhausted"
+                return None, "rate limited (429), retries exhausted", SummaryErrorCode.RATE_LIMITED
 
         except Exception as e:
             logger.warning("Summarization failed for %s: %s", title[:50], e)
-            return None, str(e)[:300]
+            return None, str(e)[:300], SummaryErrorCode.UNKNOWN_ERROR
 
-    return None, "unknown failure"
+    return None, "unknown failure", SummaryErrorCode.UNKNOWN_ERROR
 
 
 async def summarize_content(
@@ -133,23 +142,23 @@ async def summarize_content(
     description: str = "",
     author: str = "",
     transcript_chunks: list[dict[str, Any]] | None = None,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, SummaryErrorCode | None]:
     """
     Generate a brief summary that clarifies what the content is actually about,
     cutting through clickbait titles to surface the real topic, opinion, or thesis.
 
     Tries Hermes (GPT-5.4 mini) first when enabled, falling back to Claude Haiku on
-    any Hermes failure. Returns (summary, error): summary has a bullet-point breakdown
-    (with timestamps for video/podcast), or is None if all engines fail / are unconfigured,
-    in which case error carries the last engine's failure message (e.g. Hermes's "model
-    does not exist or you do not have access to it" during a GPT quota cooldown) so callers
-    can persist it and retry later.
+    any Hermes failure. Returns (summary, error, error_code): summary has a bullet-point
+    breakdown (with timestamps for video/podcast), or is None if content is too thin to
+    summarize or all engines fail / are unconfigured. error carries the last engine's
+    failure message for humans; error_code is the structured signal callers should
+    persist and branch retry logic on.
     """
     if not settings.anthropic_api_key and not settings.hermes_enabled:
-        return None, None
+        return None, None, None
 
     if not transcript_text and not description:
-        return None, None
+        return None, None, None
 
     has_timestamps = bool(transcript_chunks)
 
@@ -159,22 +168,29 @@ async def summarize_content(
     else:
         source_text = transcript_text[:100000] if transcript_text else description[:2000]
 
+    # Too little material to summarize (e.g. a video whose transcript never came through,
+    # leaving only a one-line description) — skip every engine rather than spend tokens on
+    # a request that can only produce a refusal or a hallucinated non-summary.
+    if len(source_text.strip()) < MIN_SOURCE_CHARS:
+        return None, None, SummaryErrorCode.INSUFFICIENT_CONTENT
+
     prompt = _build_summary_prompt(
         title, content_type, source_text, description, author, has_timestamps
     )
 
     # 1) Try Hermes (no Anthropic spend). Any miss falls through to Haiku.
     hermes_error = None
+    hermes_code = None
     if settings.hermes_enabled:
         from backend.app.services.hermes_client import run_oneshot
-        hermes_text, hermes_error = await run_oneshot(prompt)
+        hermes_text, hermes_error, hermes_code = await run_oneshot(prompt)
         if hermes_text:
             logger.info("Generated summary via Hermes for: %s (%d chars)", title[:50], len(hermes_text))
-            return _postprocess_summary(hermes_text), None
+            return _postprocess_summary(hermes_text), None, None
         logger.info("Hermes summary unavailable for %s, falling back to Haiku (%s)", title[:50], hermes_error)
 
     # 2) Fall back to Haiku.
-    haiku_text, haiku_error = await summarize_via_haiku(prompt, title)
+    haiku_text, haiku_error, haiku_code = await summarize_via_haiku(prompt, title)
     if haiku_text:
-        return haiku_text, None
-    return None, hermes_error or haiku_error
+        return haiku_text, None, None
+    return None, haiku_error or hermes_error, haiku_code or hermes_code

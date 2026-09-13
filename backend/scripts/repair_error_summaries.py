@@ -1,19 +1,27 @@
-"""Repair content items whose stored `summary` is actually an API error payload.
+"""Repair content items whose stored `summary` is actually not a usable summary.
 
-`hermes -z` prints upstream API errors to stdout and exits 0, so before
-hermes_client learned to recognise them the error text was stored verbatim as
-the summary — e.g. "HTTP 404: The model `gpt-5.5` does not exist or you do not
-have access to it." or "API call failed after 3 retries: HTTP 503: Service
-Unavailable". Those items look summarized, so neither
-`backfill_missing_summaries` (skips items that have a summary) nor
-`retry_failed_summaries` (needs `summary_error` set) ever picks them up.
+Two ways a bad `summary` can slip past ingest and still get stored:
 
-Detection uses `hermes_client.looks_like_error_response`, the same predicate that
-now rejects these responses at ingest, so the two can't drift apart.
+1. `hermes -z` prints upstream API errors to stdout and exits 0, so before
+   hermes_client learned to recognise them the error text was stored verbatim as
+   the summary — e.g. "HTTP 404: The model `gpt-5.5` does not exist or you do not
+   have access to it." Caught by `hermes_client.looks_like_error_response`.
+2. The source material was too thin to summarize (e.g. a video whose transcript
+   never arrived, leaving just a one-line description) but non-empty, so the LLM
+   produced a fluent refusal ("I'm unable to summarize this because...") instead
+   of an error-shaped response — `looks_like_error_response` doesn't catch this
+   since it only judges output shape, not whether the input had enough substance.
+   Caught by reconstructing `source_text` the same way `_resummarize` does and
+   checking it against `MIN_SOURCE_CHARS`, the same threshold the pre-flight gate
+   in `summarizer.summarize_content` now uses to skip the LLM call entirely.
+
+Both cases look summarized, so neither `backfill_missing_summaries` (skips items
+that have a summary) nor `retry_failed_summaries` (needs a retryable
+`summary_error_code`) ever picks them up.
 
 This finds them and regenerates the summary in place. Items that still can't be
-summarized get `summary_error`/`summary_failed_at` set instead, so the normal
-retry path can take over.
+summarized get `summary_error`/`summary_error_code`/`summary_failed_at` set
+instead, so the normal retry/backfill paths can take over.
 
     uv run python -m backend.scripts.repair_error_summaries --dry-run
     uv run python -m backend.scripts.repair_error_summaries
@@ -31,6 +39,7 @@ from backend.app.services.elasticsearch import (
     get_es_client,
 )
 from backend.app.services.hermes_client import looks_like_error_response
+from backend.app.services.summary_errors import MIN_SOURCE_CHARS, SummaryErrorCode
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -43,8 +52,20 @@ _SOURCE_FIELDS = [
 ]
 
 
+def _reconstruct_source_text(src: dict[str, Any]) -> str:
+    """Mirror how summarizer.summarize_content derives its source text from a doc."""
+    transcript = src.get("transcript")
+    transcript_text = transcript.get("text", "") if isinstance(transcript, dict) else ""
+    if transcript_text:
+        return transcript_text
+    content_markdown = src.get("content_markdown", "")
+    if content_markdown:
+        return content_markdown
+    return (src.get("metadata") or {}).get("description", "")
+
+
 async def _find_poisoned(es) -> list[dict[str, Any]]:
-    """Scan every content item for a summary that is really an error payload."""
+    """Scan every content item for a summary that is really not a usable summary."""
     found: list[dict[str, Any]] = []
     pit = await es.open_point_in_time(index=CONTENT_ITEMS_INDEX, keep_alive="5m")
     pit_id = pit["id"]
@@ -72,9 +93,17 @@ async def _find_poisoned(es) -> list[dict[str, Any]]:
                 summary = (hit["_source"].get("summary") or "").strip()
                 if not summary:
                     continue  # backfill_missing_summaries already covers these
-                reason = looks_like_error_response(summary)
-                if reason:
-                    hit["_repair_reason"] = reason
+                failure = looks_like_error_response(summary)
+                if failure:
+                    hit["_repair_reason"] = failure[0]
+                    found.append(hit)
+                    continue
+                source_text = _reconstruct_source_text(hit["_source"])
+                if len(source_text.strip()) < MIN_SOURCE_CHARS:
+                    hit["_repair_reason"] = (
+                        f"source material too thin ({len(source_text.strip())} chars) — "
+                        "stored summary is likely a refusal, not a real summary"
+                    )
                     found.append(hit)
     finally:
         await es.close_point_in_time(id=pit_id)
@@ -101,7 +130,7 @@ async def _resummarize(es, hit: dict[str, Any]) -> bool:
     source_text = transcript_text or src.get("content_markdown", "")
     metadata = src.get("metadata") or {}
 
-    summary, summary_error = await summarize_content(
+    summary, summary_error, summary_error_code = await summarize_content(
         title=title,
         content_type=src.get("type", "article"),
         transcript_text=source_text,
@@ -114,19 +143,32 @@ async def _resummarize(es, hit: dict[str, Any]) -> bool:
         await es.update(
             index=CONTENT_ITEMS_INDEX,
             id=doc_id,
-            body={"doc": {"summary": summary, "summary_error": None, "summary_failed_at": None}},
+            body={"doc": {
+                "summary": summary, "summary_error": None,
+                "summary_error_code": None, "summary_failed_at": None,
+            }},
         )
         logger.info("Repaired '%s' (%s)", title[:60], doc_id)
         return True
 
     # Couldn't summarize now — clear the bogus summary and record the failure so
-    # retry_failed_summaries/backfill_missing_summaries can pick it up later.
+    # retry_failed_summaries/backfill_missing_summaries can pick it up later. Don't
+    # fall back to the old poisoned summary text when the gate found the content too
+    # thin to even attempt (no error string in that case) — that would just restore
+    # the bad text into a different field.
+    if summary_error:
+        error_text = summary_error
+    elif summary_error_code == SummaryErrorCode.INSUFFICIENT_CONTENT:
+        error_text = "insufficient content to summarize"
+    else:
+        error_text = "unknown"
     await es.update(
         index=CONTENT_ITEMS_INDEX,
         id=doc_id,
         body={"doc": {
             "summary": "",
-            "summary_error": (summary_error or src.get("summary") or "unknown")[:500],
+            "summary_error": error_text[:500],
+            "summary_error_code": summary_error_code.value if summary_error_code else None,
             "summary_failed_at": datetime.now(timezone.utc).isoformat(),
         }},
     )

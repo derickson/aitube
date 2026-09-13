@@ -24,6 +24,7 @@ from backend.app.services.elasticsearch import (
     get_es_client,
 )
 from backend.app.services.feed_text import clean_feed_text
+from backend.app.services.summary_errors import RETRYABLE_SUMMARY_ERROR_CODES
 
 from dateutil import parser as dateparser
 
@@ -214,7 +215,7 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
     if source_text or doc.get("metadata", {}).get("description"):
         try:
             from backend.app.services.summarizer import summarize_content
-            summary, summary_error = await summarize_content(
+            summary, summary_error, summary_error_code = await summarize_content(
                 title=doc["title"],
                 content_type=doc["type"],
                 transcript_text=source_text,
@@ -224,8 +225,9 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
             )
             if summary:
                 doc["summary"] = summary
-            elif summary_error:
-                doc["summary_error"] = summary_error[:500]
+            elif summary_error_code:
+                doc["summary_error"] = summary_error[:500] if summary_error else None
+                doc["summary_error_code"] = summary_error_code.value
                 doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
             logger.warning("Failed to summarize %s: %s", doc.get("title", url), e)
@@ -643,7 +645,7 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             if source_text or doc.get("metadata", {}).get("description"):
                 try:
                     from backend.app.services.summarizer import summarize_content
-                    summary, summary_error = await summarize_content(
+                    summary, summary_error, summary_error_code = await summarize_content(
                         title=doc["title"],
                         content_type=doc["type"],
                         transcript_text=source_text,
@@ -653,8 +655,9 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                     )
                     if summary:
                         doc["summary"] = summary
-                    elif summary_error:
-                        doc["summary_error"] = summary_error[:500]
+                    elif summary_error_code:
+                        doc["summary_error"] = summary_error[:500] if summary_error else None
+                        doc["summary_error_code"] = summary_error_code.value
                         doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
                 except Exception as e:
                     logger.warning("Failed to summarize %s: %s", doc["title"], e)
@@ -792,36 +795,58 @@ async def deduplicate_recent_items(days: int = 7) -> int:
     return len(to_delete)
 
 
-async def backfill_missing_transcripts(limit: int = 5) -> int:
-    """Retry caption fetch for recent YouTube videos missing transcripts.
+# Bounds on transcript retry, so a permanently-uncaptioned video or a source that's
+# down for a while gets a few more chances without retrying forever or hammering
+# the source every poll cycle. Age of the item is deliberately not a factor — an
+# item that failed 6 months ago is just as eligible as one from today, as long as
+# it hasn't used up its attempts.
+MAX_TRANSCRIPT_ATTEMPTS = 4
+TRANSCRIPT_RETRY_COOLDOWN_HOURS = 4
 
-    Only uses yt-dlp captions (not content-dlp transcription) to stay lightweight.
-    Processes at most `limit` videos per cycle to avoid YouTube rate limits.
-    Returns the number of videos successfully backfilled.
+
+async def backfill_missing_transcripts(limit: int = 5) -> int:
+    """Retry transcript fetch for videos and podcasts missing one.
+
+    Videos try yt-dlp captions, then fall back to content-dlp transcription.
+    Podcasts retry content-dlp transcription of the episode audio. Bounded by
+    `MAX_TRANSCRIPT_ATTEMPTS` and `TRANSCRIPT_RETRY_COOLDOWN_HOURS` rather than a
+    discovery-age window, so an old item stuck on a transient failure still gets
+    picked back up. Processes at most `limit` items per cycle. Returns the number
+    successfully backfilled.
     """
     from backend.app.services.youtube_captions import fetch_video_metadata
     from backend.app.services.summarizer import summarize_content
 
     es = get_es_client()
-    # transcript field is "enabled: false" so we can't filter on it in ES;
-    # fetch recent videos and filter in Python
+    cooldown_cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=TRANSCRIPT_RETRY_COOLDOWN_HOURS)
+    ).isoformat()
+    # transcript field isn't reliably queryable across index versions (v1 disables
+    # the whole object; v2 indexes transcript.text but not its absence), so fetch
+    # candidates by type/attempt-bounds and filter "has no transcript" in Python.
     resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
         body={
             "query": {
                 "bool": {
                     "must": [
-                        {"term": {"type": "video"}},
-                        {"range": {"discovered_at": {"gte": "now-14d"}}},
+                        {"terms": {"type": ["video", "podcast_episode"]}},
+                    ],
+                    "must_not": [
+                        {"range": {"transcript_attempts": {"gte": MAX_TRANSCRIPT_ATTEMPTS}}},
+                        {"range": {"transcript_last_attempted_at": {"gt": cooldown_cutoff}}},
                     ],
                 }
             },
-            "_source": ["title", "url", "type", "transcript", "metadata", "summary"],
+            "_source": [
+                "title", "url", "type", "transcript", "metadata", "summary",
+                "transcript_attempts", "duration_seconds",
+            ],
             "size": 200,
         },
     )
 
-    # Filter to videos with no transcript
+    # Filter to items with no transcript
     candidates = []
     for hit in resp["hits"]["hits"]:
         src = hit["_source"]
@@ -842,30 +867,57 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
         src = hit["_source"]
         title = src.get("title", "?")
         url = src.get("url", "")
+        content_type = src.get("type")
+        attempts = (src.get("transcript_attempts") or 0) + 1
+        now_iso = datetime.now(timezone.utc).isoformat()
         if not url:
             continue
 
         try:
             transcript = None
+            meta = None
 
-            # Try yt-dlp captions first
-            meta = fetch_video_metadata(url)
-            if meta and meta.get("captions"):
-                transcript = meta["captions"]
+            if content_type == "video":
+                # Try yt-dlp captions first
+                meta = fetch_video_metadata(url)
+                if meta and meta.get("captions"):
+                    transcript = meta["captions"]
 
-            # Fall back to content-dlp transcription (handles 429 rate limits on yt-dlp)
-            if not transcript:
+                # Fall back to content-dlp transcription (handles 429 rate limits on yt-dlp)
+                if not transcript:
+                    try:
+                        yt_data = await content_dlp.fetch_youtube(url, no_audio=False, transcript=True)
+                        if yt_data.get("transcript"):
+                            t = yt_data["transcript"]
+                            transcript = t if isinstance(t, dict) else {"text": t, "chunks": []}
+                    except Exception as e:
+                        logger.warning("Backfill: content-dlp also failed for '%s': %s", title[:60], e)
+
+            elif content_type == "podcast_episode":
+                extras = (src.get("metadata") or {}).get("extras", {})
+                audio_url = extras.get("enclosure_url", url)
                 try:
-                    yt_data = await content_dlp.fetch_youtube(url, no_audio=False, transcript=True)
-                    if yt_data.get("transcript"):
-                        t = yt_data["transcript"]
+                    transcript_data = await content_dlp.download_and_transcribe(audio_url)
+                    if transcript_data.get("transcript"):
+                        t = transcript_data["transcript"]
                         transcript = t if isinstance(t, dict) else {"text": t, "chunks": []}
                 except Exception as e:
-                    logger.warning("Backfill: content-dlp also failed for '%s': %s", title[:60], e)
+                    logger.warning("Backfill: podcast transcription failed for '%s': %s", title[:60], e)
+
+            update_fields: dict[str, Any] = {
+                "transcript_attempts": attempts,
+                "transcript_last_attempted_at": now_iso,
+            }
 
             if not transcript:
+                await es.update(index=CONTENT_ITEMS_INDEX, id=doc_id, body={"doc": update_fields})
+                logger.info(
+                    "Backfill: attempt %d/%d still no transcript for '%s' (%s)",
+                    attempts, MAX_TRANSCRIPT_ATTEMPTS, title[:60], doc_id,
+                )
                 continue
-            update_fields: dict[str, Any] = {"transcript": transcript}
+
+            update_fields["transcript"] = transcript
 
             # Re-generate summary with transcript timestamps
             transcript_text = transcript.get("text", "") if isinstance(transcript, dict) else ""
@@ -873,9 +925,9 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
             description = src.get("metadata", {}).get("description", "")
             author = src.get("metadata", {}).get("author", "")
 
-            new_summary, new_summary_error = await summarize_content(
+            new_summary, new_summary_error, new_summary_error_code = await summarize_content(
                 title=title,
-                content_type="video",
+                content_type=content_type,
                 transcript_text=transcript_text,
                 description=description,
                 author=author,
@@ -884,13 +936,15 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
             if new_summary:
                 update_fields["summary"] = new_summary
                 update_fields["summary_error"] = None
+                update_fields["summary_error_code"] = None
                 update_fields["summary_failed_at"] = None
-            elif new_summary_error:
-                update_fields["summary_error"] = new_summary_error[:500]
-                update_fields["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
+            elif new_summary_error_code:
+                update_fields["summary_error"] = new_summary_error[:500] if new_summary_error else None
+                update_fields["summary_error_code"] = new_summary_error_code.value
+                update_fields["summary_failed_at"] = now_iso
 
-            # Also backfill duration if missing
-            if not hit["_source"].get("duration_seconds") and meta.get("duration"):
+            # Also backfill duration if missing (video only — yt-dlp metadata)
+            if meta and not src.get("duration_seconds") and meta.get("duration"):
                 update_fields["duration_seconds"] = meta["duration"]
 
             await es.update(
@@ -906,7 +960,7 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
             logger.warning("Backfill: failed for '%s' (%s): %s", title[:60], doc_id, e)
 
     if backfilled:
-        logger.info("Backfilled transcripts for %d video(s)", backfilled)
+        logger.info("Backfilled transcripts for %d item(s)", backfilled)
     return backfilled
 
 
@@ -970,7 +1024,7 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
             description = src.get("metadata", {}).get("description", "")
             author = src.get("metadata", {}).get("author", "")
 
-            summary, summary_error = await summarize_content(
+            summary, summary_error, summary_error_code = await summarize_content(
                 title=title,
                 content_type=content_type,
                 transcript_text=source_text,
@@ -982,18 +1036,22 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
                 await es.update(
                     index=CONTENT_ITEMS_INDEX,
                     id=doc_id,
-                    body={"doc": {"summary": summary, "summary_error": None, "summary_failed_at": None}},
+                    body={"doc": {
+                        "summary": summary, "summary_error": None,
+                        "summary_error_code": None, "summary_failed_at": None,
+                    }},
                 )
                 backfilled += 1
                 logger.info("Backfill: generated summary for '%s' (%s)", title[:60], doc_id)
             else:
                 logger.warning("Backfill: summarize_content returned None for '%s' (%s)", title[:60], summary_error)
-                if summary_error:
+                if summary_error_code:
                     await es.update(
                         index=CONTENT_ITEMS_INDEX,
                         id=doc_id,
                         body={"doc": {
-                            "summary_error": summary_error[:500],
+                            "summary_error": summary_error[:500] if summary_error else None,
+                            "summary_error_code": summary_error_code.value,
                             "summary_failed_at": datetime.now(timezone.utc).isoformat(),
                         }},
                     )
@@ -1006,30 +1064,15 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
     return backfilled
 
 
-# Hermes reports a quota cooldown as an upstream API error, e.g.
-# "HTTP 404: The model gpt-5.4-mini does not exist or you do not have access to it."
-# The model name and the exact wording change over time (cooldowns have also shown up as
-# "HTTP 400: ... is not supported when using Codex with a ChatGPT account" and
-# "API call failed after 3 retries: HTTP 503: Service Unavailable"), so match the fixed
-# suffix of the known message *or* any HTTP status anywhere in the captured error.
-# Unanchored, unlike hermes_client._API_ERROR_RE: this only ever sees error strings,
-# never a summary that might legitimately mention a status code.
-_RETRYABLE_SUMMARY_ERROR_RE = re.compile(
-    r"does not exist or you do not have access to it|\bHTTP \d{3}\b", re.IGNORECASE
-)
-
-
-def _is_retryable_summary_error(error: str | None) -> bool:
-    return bool(error) and bool(_RETRYABLE_SUMMARY_ERROR_RE.search(error))
-
-
 async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
-    """Retry summaries that previously failed with a Hermes quota-cooldown error.
+    """Retry summaries that previously failed with a retryable, transient error
+    (e.g. a Hermes quota cooldown, a timeout, a rate limit).
 
-    Targets items from the last `hours` hours whose summary failed with a message
-    matching `_RETRYABLE_SUMMARY_ERROR_RE` (Hermes model temporarily inaccessible),
-    which usually clears once the quota cooldown ends. Processes at most `limit`
-    items per cycle. Returns the number of summaries successfully recovered.
+    Targets items from the last `hours` hours whose `summary_error_code` is in
+    `RETRYABLE_SUMMARY_ERROR_CODES` — filtered directly in the ES query rather than
+    pulling every doc with any error and regex-matching the free-text message.
+    Processes at most `limit` items per cycle. Returns the number of summaries
+    successfully recovered.
     """
     from backend.app.services.summarizer import summarize_content
 
@@ -1041,13 +1084,13 @@ async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
                 "bool": {
                     "must": [
                         {"range": {"discovered_at": {"gte": f"now-{hours}h"}}},
-                        {"exists": {"field": "summary_error"}},
+                        {"terms": {"summary_error_code": [c.value for c in RETRYABLE_SUMMARY_ERROR_CODES]}},
                     ],
                 }
             },
             "_source": [
                 "title", "url", "type", "transcript", "content_markdown",
-                "metadata", "summary", "summary_error",
+                "metadata", "summary", "summary_error", "summary_error_code",
             ],
             "size": 200,
         },
@@ -1056,7 +1099,7 @@ async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
     candidates = []
     for hit in resp["hits"]["hits"]:
         src = hit["_source"]
-        if src.get("summary") or not _is_retryable_summary_error(src.get("summary_error")):
+        if src.get("summary"):
             continue
         transcript = src.get("transcript")
         has_transcript = isinstance(transcript, dict) and transcript.get("text")
@@ -1087,7 +1130,7 @@ async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
             description = src.get("metadata", {}).get("description", "")
             author = src.get("metadata", {}).get("author", "")
 
-            summary, summary_error = await summarize_content(
+            summary, summary_error, summary_error_code = await summarize_content(
                 title=title,
                 content_type=content_type,
                 transcript_text=source_text,
@@ -1099,18 +1142,22 @@ async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
                 await es.update(
                     index=CONTENT_ITEMS_INDEX,
                     id=doc_id,
-                    body={"doc": {"summary": summary, "summary_error": None, "summary_failed_at": None}},
+                    body={"doc": {
+                        "summary": summary, "summary_error": None,
+                        "summary_error_code": None, "summary_failed_at": None,
+                    }},
                 )
                 retried += 1
                 logger.info("Retry: recovered summary for '%s' (%s)", title[:60], doc_id)
-            elif summary_error and summary_error != src.get("summary_error"):
+            elif summary_error_code and summary_error_code.value != src.get("summary_error_code"):
                 # Still failing, but record the latest error (e.g. cooldown cleared but
                 # a different failure occurred) so the next retry pass re-evaluates it fresh.
                 await es.update(
                     index=CONTENT_ITEMS_INDEX,
                     id=doc_id,
                     body={"doc": {
-                        "summary_error": summary_error[:500],
+                        "summary_error": summary_error[:500] if summary_error else None,
+                        "summary_error_code": summary_error_code.value,
                         "summary_failed_at": datetime.now(timezone.utc).isoformat(),
                     }},
                 )
@@ -1164,7 +1211,7 @@ async def poll_all_active() -> dict[str, list[str]]:
     # Clean up any duplicate content items from recent polls
     await deduplicate_recent_items()
 
-    # Retry transcript fetch for videos that failed on initial poll
+    # Retry transcript fetch for videos and podcasts that failed on initial poll
     await backfill_missing_transcripts()
 
     # Generate summaries for recent items that are missing them

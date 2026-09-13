@@ -63,6 +63,7 @@ export interface ContentItemSummary {
   duration_seconds: number | null;
   thumbnail_url: string;
   summary: string;
+  summary_error_code: string | null;
   interest_score: number | null;
   user_interest: "up" | "down" | null;
   consumed: boolean;
@@ -72,6 +73,7 @@ export interface ContentItemSummary {
 
 export interface ContentItem extends ContentItemSummary {
   interest_reasoning: string;
+  summary_error: string | null;
   transcript: Transcript | null;
   content_markdown: string;
   metadata: Record<string, unknown>;

@@ -20,6 +20,7 @@ from backend.app.services.elasticsearch import (
     content_index_pipeline,
     get_es_client,
 )
+from backend.app.services.summary_errors import SummaryErrorCode
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/add-content", tags=["add-content"])
@@ -422,9 +423,10 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
     # Generate summary
     summary = ""
     summary_error = None
+    summary_error_code = None
     if transcript_text:
         try:
-            summary, summary_error = await summarize_content(
+            summary, summary_error, summary_error_code = await summarize_content(
                 title=title,
                 content_type="podcast_episode",
                 transcript_text=transcript_text,
@@ -436,6 +438,7 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
         except Exception as e:
             logger.warning("Failed to summarize podcast %s: %s", url, e)
             summary_error = str(e)[:300]
+            summary_error_code = SummaryErrorCode.UNKNOWN_ERROR
 
     doc = {
         "subscription_id": "adhoc",
@@ -460,8 +463,9 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
             "extras": {"podcast_name": meta.get("podcast_name"), "enclosure_url": url},
         },
     }
-    if not summary and summary_error:
+    if not summary and summary_error_code:
         doc["summary_error"] = summary_error
+        doc["summary_error_code"] = summary_error_code.value
         doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
 
     es = get_es_client()
@@ -521,9 +525,10 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
     # Generate summary
     summary = ""
     summary_error = None
+    summary_error_code = None
     if markdown:
         try:
-            summary, summary_error = await summarize_content(
+            summary, summary_error, summary_error_code = await summarize_content(
                 title=title,
                 content_type="article",
                 transcript_text=markdown,
@@ -534,6 +539,7 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
         except Exception as e:
             logger.warning("Failed to summarize article %s: %s", url, e)
             summary_error = str(e)[:300]
+            summary_error_code = SummaryErrorCode.UNKNOWN_ERROR
 
     doc = {
         "subscription_id": "adhoc",
@@ -553,8 +559,9 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
         "content_dlp_cache_id": cache_id,
         "metadata": {"description": "", "author": None, "tags": [], "extras": {}},
     }
-    if not summary and summary_error:
+    if not summary and summary_error_code:
         doc["summary_error"] = summary_error
+        doc["summary_error_code"] = summary_error_code.value
         doc["summary_failed_at"] = datetime.now(timezone.utc).isoformat()
 
     es = get_es_client()

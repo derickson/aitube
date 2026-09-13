@@ -92,7 +92,7 @@ async def list_content(
         "includes": [
             "subscription_id", "external_id", "type", "title", "url",
             "published_at", "discovered_at", "duration_seconds",
-            "thumbnail_url", "summary", "interest_score",
+            "thumbnail_url", "summary", "summary_error_code", "interest_score",
             "user_interest", "consumed", "viewed", "engagement",
         ]
     }
@@ -238,7 +238,7 @@ async def predictions(limit: int | None = Query(default=None, le=500)):
                 "includes": [
                     "subscription_id", "external_id", "type", "title", "url",
                     "published_at", "discovered_at", "duration_seconds",
-                    "thumbnail_url", "summary", "interest_score",
+                    "thumbnail_url", "summary", "summary_error_code", "interest_score",
                     "user_interest", "consumed", "viewed", "engagement",
                 ]
             },

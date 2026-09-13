@@ -19,6 +19,7 @@ import shlex
 import elasticapm
 
 from backend.app.config import settings
+from backend.app.services.summary_errors import SummaryErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,24 @@ _API_ERROR_RE = re.compile(r"^HTTP \d{3}\b")
 # "exactly 5 bullets" would reject 7.7% of real summaries for no added coverage.
 _MIN_SUMMARY_CHARS = 200
 
+# A model sometimes replies in fluent prose explaining it can't summarize thin
+# source material (e.g. a video description padded with sponsor/contact boilerplate
+# that clears _MIN_SUMMARY_CHARS by raw length but has no real content) instead of
+# failing outright. That reply is well-formed English over 200 chars, so the length
+# check alone doesn't catch it — it slips through and gets stored as the summary.
+# Matched against the first 300 chars since a real summary wouldn't open this way.
+_REFUSAL_PHRASES = (
+    "unable to summarize",
+    "i cannot summarize",
+    "i can't summarize",
+    "don't have enough information",
+    "not enough information to summarize",
+    "only provided the title",
+)
 
-def looks_like_error_response(text: str) -> str | None:
-    """Return why `text` cannot be a summary, or None if it looks like one.
+
+def looks_like_error_response(text: str) -> tuple[str, SummaryErrorCode] | None:
+    """Return (detail, code) for why `text` cannot be a summary, or None if it looks like one.
 
     Hermes reports upstream failures in-band (stdout, exit 0), so the response body
     is the only signal that anything went wrong. Shared with
@@ -50,11 +66,17 @@ def looks_like_error_response(text: str) -> str | None:
     """
     stripped = (text or "").strip()
     if not stripped:
-        return "empty response"
+        return "empty response", SummaryErrorCode.EMPTY_RESPONSE
     if _API_ERROR_RE.match(stripped):
-        return stripped[:300]
+        return stripped[:300], SummaryErrorCode.UPSTREAM_HTTP_ERROR
+    head = stripped[:300].lower()
+    if any(phrase in head for phrase in _REFUSAL_PHRASES):
+        return stripped[:300], SummaryErrorCode.INSUFFICIENT_CONTENT
     if len(stripped) < _MIN_SUMMARY_CHARS:
-        return f"response too short to be a summary ({len(stripped)} chars): {stripped[:200]}"
+        return (
+            f"response too short to be a summary ({len(stripped)} chars): {stripped[:200]}",
+            SummaryErrorCode.TOO_SHORT_RESPONSE,
+        )
     return None
 
 
@@ -75,17 +97,19 @@ def _build_remote_command(use_model: str) -> str:
     return " ".join(parts)
 
 
-async def run_oneshot(prompt: str, *, model: str | None = None) -> tuple[str | None, str | None]:
-    """Send `prompt` to `hermes -z` over SSH; return (response_text, error).
+async def run_oneshot(
+    prompt: str, *, model: str | None = None
+) -> tuple[str | None, str | None, SummaryErrorCode | None]:
+    """Send `prompt` to `hermes -z` over SSH; return (response_text, error, error_code).
 
     response_text is None (not raised) for every failure mode — disabled, connect/timeout,
     non-zero exit, empty output — so summarizer can fall back to Haiku cleanly. `error` carries
     a short description of what went wrong (e.g. the ssh/hermes stderr, which for a quota
     cooldown looks like "HTTP 404: The model <model> does not exist or you do not have access
-    to it."), so callers can persist it for later triage/retry.
+    to it."), and `error_code` is the structured signal callers should branch retry logic on.
     """
     if not settings.hermes_enabled or not settings.hermes_ssh_target:
-        return None, None
+        return None, None, None
 
     use_model = model if model is not None else settings.hermes_model
     remote_cmd = _build_remote_command(use_model)
@@ -117,19 +141,20 @@ async def run_oneshot(prompt: str, *, model: str | None = None) -> tuple[str | N
             )
         except asyncio.TimeoutError:
             logger.warning("Hermes timed out after %ds", settings.hermes_timeout_seconds)
-            return None, f"timed out after {settings.hermes_timeout_seconds}s"
+            return None, f"timed out after {settings.hermes_timeout_seconds}s", SummaryErrorCode.TIMEOUT
         except OSError as e:
             logger.warning("Hermes ssh spawn failed: %s", e)
-            return None, f"ssh spawn failed: {e}"
+            return None, f"ssh spawn failed: {e}", SummaryErrorCode.SSH_ERROR
 
     if proc.returncode != 0:
         err_text = stderr.decode(errors="replace")[:300].strip()
         logger.warning("Hermes ssh exited %s: %s", proc.returncode, err_text)
-        return None, err_text or f"ssh exited {proc.returncode}"
+        return None, err_text or f"ssh exited {proc.returncode}", SummaryErrorCode.SSH_ERROR
 
     text = stdout.decode(errors="replace").strip()
     failure = looks_like_error_response(text)
     if failure:
-        logger.warning("Hermes returned no usable summary (exit 0): %s", failure[:200])
-        return None, failure
-    return text, None
+        detail, code = failure
+        logger.warning("Hermes returned no usable summary (exit 0): %s", detail[:200])
+        return None, detail, code
+    return text, None, None

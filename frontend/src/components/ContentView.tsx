@@ -284,6 +284,12 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
               </div>
             )}
 
+            {!item.summary && item.summary_error_code && (
+              <div className="flyout-summary flyout-summary-error">
+                <p className="flyout-summary-text">Summary could not be generated due to an error.</p>
+              </div>
+            )}
+
             {item.type === "article" && (
               <ArticleReader item={item} onConsumed={() => {
                 setConsumed(true);
