@@ -421,6 +421,28 @@ export function getQuarantineStats(): Promise<QuarantineStatsResponse> {
   return apiFetch("/content/quarantine-stats/");
 }
 
+export interface WatchTimeHourlyBucket {
+  hour: string;
+  date: string;
+  hour_of_day: number;
+  minutes: number;
+  minutes_by_type: Record<string, number>;
+}
+
+export interface WatchTimeHourlyResponse {
+  generated_at: string;
+  timezone: string;
+  today_total_minutes: number;
+  yesterday_total_minutes: number;
+  today: WatchTimeHourlyBucket[];
+  yesterday: WatchTimeHourlyBucket[];
+}
+
+export function getWatchTimeHourly(tz?: string): Promise<WatchTimeHourlyResponse> {
+  const qs = tz ? `?tz=${encodeURIComponent(tz)}` : "";
+  return apiFetch(`/consumption_stats/hourly/${qs}`);
+}
+
 export function ingestContent(
   url: string,
   title?: string,

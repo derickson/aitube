@@ -58,6 +58,9 @@ export function SettingsMenu() {
           <NavLink to="/quarantine/" role="menuitem" onClick={close}>
             Quarantine
           </NavLink>
+          <NavLink to="/watch-time/" role="menuitem" onClick={close}>
+            Watch Time
+          </NavLink>
         </div>
       )}
     </div>

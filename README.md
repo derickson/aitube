@@ -200,12 +200,13 @@ Tunables (in `.env`, all optional):
 - **Viewed tracking** — marks content as viewed on first open, independent of playback completion
 - **Playback tracking** with resume from last position and 90% auto-complete
 - **Consumption report** API — JSON report of engagement signals (consumed, viewed, watch percentage, interest) with filters
+- **Watch time analytics** — minutes consumed per hour, derived from playback position deltas as they're reported; hourly totals accumulate into Elasticsearch every 15 minutes so an hourly-polled API path can track same-day consumption as it happens
 - **Interest voting** (up/down) per content item to mark what's interesting
 - **AI summaries** with bullet-point breakdowns and clickable timestamp links for video/podcast seek
 - **Ad skip** for podcasts — Claude detects sponsor reads and sets playback past them
 - **Smart URL resolution** for YouTube channels, Apple Podcasts, Spotify, and RSS discovery
 - **Light/dark theme** toggle
-- **Settings menu** (gear icon, top right, next to the theme toggle) — houses **Content** (subscription management, formerly its own nav tab) and **Quarantine** (analytics on items the external transcript judge rejected: a blind-spot map plotting each item's interest-model and engagement-classifier percentiles against the non-quarantined population — to see whether our own models were fooled — plus reason and channel breakdowns, a weekly timeline, and a drill-down ledger)
+- **Settings menu** (gear icon, top right, next to the theme toggle) — houses **Content** (subscription management, formerly its own nav tab), **Quarantine** (analytics on items the external transcript judge rejected: a blind-spot map plotting each item's interest-model and engagement-classifier percentiles against the non-quarantined population — to see whether our own models were fooled — plus reason and channel breakdowns, a weekly timeline, and a drill-down ledger), and **Watch Time** (minutes watched per hour, today vs. yesterday, with a by-content-type breakdown; auto-refreshes while open)
 - **Ad-hoc content** — add any YouTube video, podcast MP3, or web article directly via the Add Content page with metadata preview before processing
 - **Subscription management** with per-feed interest notes, type-colored cards, search, and filters
 - **Topic Flow** — unsupervised clustering of the recent corpus (Jina v5 clustering-task embeddings, density-probed centroid seeds, Hermes-written ≤5-word topic titles). Tab shows a UMAP cluster map and a "topic story chains" flow diagram (per-cluster ribbons over time, shared colors) above selectable topic cards
@@ -221,6 +222,7 @@ backend/
       subscriptions.py   # CRUD + URL resolution
       content.py         # Search, facets, CSV export, interest, consumed, viewed
       consumption_report.py # Engagement report endpoint
+      consumption_stats.py # Watch-time-per-hour analytics (backs the settings menu's Watch Time page)
       playback.py        # Position tracking
       polling.py         # Feed poll triggers
       chat.py            # Streaming content Q&A with agents
@@ -237,6 +239,7 @@ backend/
       metadata_extractor.py # LLM-powered metadata extraction for ad-hoc content
       content_cleanup.py # Two-stage article cleanup (regex + LLM)
       agents.py          # Agent registry for content chat
+      watch_time_tracker.py # Diffs playhead positions into hourly watch-minutes buckets
       jina_embeddings.py # Jina API client (task=clustering)
       clustering.py      # Topic Flow pipeline (embed, seed, classify, label, UMAP)
     models/              # Pydantic schemas
@@ -258,7 +261,8 @@ frontend/
       TopicFlow.tsx          # Topic Flow tab (Plotly UMAP scatter + story chains + cards + flyout)
       TopicStoryChains.tsx   # Custom SVG temporal "story chains" flow diagram
       QuarantinePage.tsx     # Settings menu → Quarantine: blind-spot map + reason/channel/time breakdowns + ledger
-      SettingsMenu.tsx       # Gear-icon dropdown (Content, Quarantine)
+      WatchTimePage.tsx      # Settings menu → Watch Time: today-vs-yesterday and by-source hourly charts
+      SettingsMenu.tsx       # Gear-icon dropdown (Content, Quarantine, Watch Time)
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
     theme/               # Light/dark theme
@@ -302,6 +306,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/topic-flow/flow/` | Per-cluster daily content counts for the swimlane flow chart |
 | GET | `/api/topic-flow/cluster/{cluster_id}/items/` | Content items belonging to a cluster (per `run_id`) |
 | GET | `/api/content/quarantine-stats/` | Quarantine analytics: verdicts, reason/channel breakdowns, weekly timeline, per-item ledger (backs the settings menu's Quarantine page) |
+| GET | `/api/consumption_stats/hourly/` | Minutes watched per hour, today + yesterday, in the given `tz` (IANA name, default UTC); safe to poll periodically |
 
 ## Automation API
 

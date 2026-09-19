@@ -10,6 +10,7 @@ from backend.app.services.elasticsearch import (
 )
 from backend.app.services import content_cache
 from backend.app.services.playback_buffer import playback_buffer
+from backend.app.services.watch_time_tracker import watch_time_tracker
 
 router = APIRouter(prefix="/api/playback", tags=["playback"])
 
@@ -55,8 +56,10 @@ async def update_playback(content_item_id: str, data: PlaybackUpdate):
 
     # Check if content item has a duration to determine consumed status
     consumed = False
+    content_type = None
     try:
         item_resp = await es.get(index=CONTENT_ITEMS_INDEX, id=content_item_id)
+        content_type = item_resp["_source"].get("type")
         duration = item_resp["_source"].get("duration_seconds")
         # Backfill duration from player if missing
         if not duration and data.duration_seconds and data.duration_seconds > 0:
@@ -71,6 +74,8 @@ async def update_playback(content_item_id: str, data: PlaybackUpdate):
             content_cache.invalidate()
     except Exception:
         pass
+
+    watch_time_tracker.record(content_item_id, position, content_type, now)
 
     doc = {
         "content_item_id": content_item_id,

@@ -6,9 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.config import settings
-from backend.app.routers import subscriptions, content, playback, polling, chat, watchlist, add_content, consumption_report, topic_flow, quarantine
+from backend.app.routers import subscriptions, content, playback, polling, chat, watchlist, add_content, consumption_report, consumption_stats, topic_flow, quarantine
 from backend.app.services.elasticsearch import close_es_client, ensure_indices
 from backend.app.services.playback_buffer import playback_buffer
+from backend.app.services.watch_time_tracker import watch_time_tracker
 
 if settings.elastic_apm_server_url:
     from elasticapm.contrib.starlette import make_apm_client, ElasticAPM
@@ -27,7 +28,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not connect to Elasticsearch on startup: %s", e)
     playback_buffer.start()
+    watch_time_tracker.start()
     yield
+    await watch_time_tracker.stop()
     await playback_buffer.stop()
     await close_es_client()
 
@@ -64,6 +67,7 @@ app.include_router(chat.router)
 app.include_router(watchlist.router)
 app.include_router(add_content.router)
 app.include_router(consumption_report.router)
+app.include_router(consumption_stats.router)
 app.include_router(topic_flow.router)
 app.include_router(quarantine.router)
 

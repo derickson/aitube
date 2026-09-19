@@ -267,6 +267,64 @@ main:has(.flyout-open) {
   overflow-x: auto;
 }
 
+/* Watch time analytics page */
+
+.watch-time-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  padding-bottom: 3rem;
+}
+
+.watch-time-header h2 {
+  font-size: 1.4rem;
+}
+
+.watch-time-sub,
+.watch-time-chart-caption {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.watch-time-stat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.watch-time-stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  min-width: 9rem;
+}
+
+.watch-time-stat-tile strong {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.watch-time-stat-tile span {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.watch-time-chart-block {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.watch-time-chart-block h3 {
+  font-size: 1rem;
+}
+
 .quarantine-table {
   width: 100%;
   border-collapse: collapse;

@@ -7,6 +7,7 @@ CONTENT_ITEMS_INDEX = settings.content_items_index
 CONTENT_ITEMS_INDEX_V1 = "aitube-content-items"
 CONTENT_ITEMS_INDEX_V2 = settings.content_items_index_v2
 PLAYBACK_STATE_INDEX = "aitube-playback-state"
+WATCH_TIME_INDEX = "aitube-watch-time"
 CLUSTER_RUNS_INDEX = "aitube-cluster-runs"
 QUARANTINE_EVENTS_INDEX = "aitube-quarantine-events"
 SUMMARY_EVAL_INDEX = settings.summary_eval_index
@@ -208,6 +209,22 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "position_seconds": {"type": "float"},
                 "consumed": {"type": "boolean"},
                 "last_updated_at": {"type": "date"},
+            }
+        }
+    },
+    WATCH_TIME_INDEX: {
+        "mappings": {
+            "properties": {
+                "hour": {"type": "date"},
+                "total_seconds": {"type": "float"},
+                "by_type": {
+                    "type": "object",
+                    "properties": {
+                        "youtube_channel": {"type": "float"},
+                        "podcast": {"type": "float"},
+                        "rss": {"type": "float"},
+                    },
+                },
             }
         }
     },
