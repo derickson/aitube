@@ -5,6 +5,7 @@ import {
   batchPlaybackProgress,
   setInterest as apiSetInterest,
   setConsumed as apiSetConsumed,
+  CATEGORY_LABELS,
   type ContentType,
   type ContentSearchResponse,
   type FacetBucket,
@@ -71,10 +72,28 @@ export function Timeline() {
   const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">("");
   const [subFilter, setSubFilter] = useState("");
   const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
+  // Tri-state per category: "include" (+), "exclude" (-, muted), or absent (neutral).
+  const [categoryState, setCategoryState] = useState<Record<string, "include" | "exclude">>({});
   // Client-side filter for the Source facet list
   const [subSearch, setSubSearch] = useState("");
   consumedFilterRef.current = consumedFilter;
   interestFilterRef.current = interestFilter;
+
+  const cycleCategory = useCallback((label: string) => {
+    setCategoryState((prev) => {
+      const current = prev[label];
+      const next = { ...prev };
+      if (!current) next[label] = "include";
+      else if (current === "include") next[label] = "exclude";
+      else delete next[label];
+      return next;
+    });
+  }, []);
+
+  const categoryInclude = Object.keys(categoryState).filter((k) => categoryState[k] === "include");
+  const categoryExclude = Object.keys(categoryState).filter((k) => categoryState[k] === "exclude");
+  const categoryIncludeCsv = categoryInclude.join(",");
+  const categoryExcludeCsv = categoryExclude.join(",");
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -90,6 +109,8 @@ export function Timeline() {
           subscription_id: subFilter || undefined,
           consumed: (consumedFilter || undefined) as "true" | "false" | undefined,
           interest: (interestFilter || undefined) as "up" | "down" | "none" | undefined,
+          category_include: categoryIncludeCsv || undefined,
+          category_exclude: categoryExcludeCsv || undefined,
           size: 200,
         }),
         listSubscriptions(),
@@ -115,7 +136,7 @@ export function Timeline() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, typeFilter, subFilter, consumedFilter, interestFilter]);
+  }, [debouncedSearch, typeFilter, subFilter, consumedFilter, interestFilter, categoryIncludeCsv, categoryExcludeCsv]);
 
   useEffect(() => {
     fetchData();
@@ -163,6 +184,7 @@ export function Timeline() {
   const typeBuckets = facets.type ?? [];
   const consumedBuckets = facets.consumed ?? [];
   const interestBuckets = facets.interest ?? [];
+  const categoryBuckets = facets.category ?? [];
   const subBuckets = (facets.subscription_id ?? [])
     .sort((a, b) => {
       const nameA = subs[a.key]?.name ?? a.key;
@@ -260,6 +282,30 @@ export function Timeline() {
             >
               <span>Not interested</span><span className="facet-count">{facetCount(interestBuckets, "down")}</span>
             </button>
+          </div>
+
+          <div className="facet-group">
+            <h4 className="facet-heading">Category</h4>
+            <p className="facet-hint">Click once to require (+), again to mute (−)</p>
+            {Object.keys(categoryState).length > 0 && (
+              <button className="facet-item" onClick={() => setCategoryState({})}>
+                <span>Clear</span>
+              </button>
+            )}
+            {CATEGORY_LABELS.map((label) => {
+              const state = categoryState[label];
+              return (
+                <button
+                  key={label}
+                  className={`facet-item facet-category${state === "include" ? " category-included" : ""}${state === "exclude" ? " category-excluded" : ""}`}
+                  onClick={() => cycleCategory(label)}
+                  title={state === "include" ? "Required — click to mute" : state === "exclude" ? "Muted — click to clear" : "Click to require"}
+                >
+                  <span>{state === "include" ? "+ " : state === "exclude" ? "− " : ""}{label}</span>
+                  <span className="facet-count">{facetCount(categoryBuckets, label)}</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="facet-group">

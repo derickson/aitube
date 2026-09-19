@@ -37,6 +37,8 @@ async def list_content(
     content_type: str | None = None,
     consumed: str | None = None,  # "true", "false", or None for all
     interest: str | None = None,  # "up", "down", "none", or None for all
+    category_include: str | None = None,  # comma-separated category labels to require ("+")
+    category_exclude: str | None = None,  # comma-separated category labels to mute ("-")
     q: str | None = None,
     sort: str = "date",  # "date" or "relevance"
     size: int = Query(default=50, le=200),
@@ -44,8 +46,9 @@ async def list_content(
 ):
     cache_params = {
         "subscription_id": subscription_id, "content_type": content_type,
-        "consumed": consumed, "interest": interest, "q": q,
-        "sort": sort, "size": size, "offset": offset,
+        "consumed": consumed, "interest": interest,
+        "category_include": category_include, "category_exclude": category_exclude,
+        "q": q, "sort": sort, "size": size, "offset": offset,
     }
     cached = content_cache.get(cache_params)
     if cached is not None:
@@ -72,6 +75,14 @@ async def list_content(
         filter_clauses.append({"term": {"user_interest": "down"}})
     elif interest == "none":
         filter_clauses.append({"bool": {"must_not": {"exists": {"field": "user_interest"}}}})
+    if category_include:
+        included = [c for c in category_include.split(",") if c]
+        if included:
+            filter_clauses.append({"terms": {"category": included}})
+    if category_exclude:
+        excluded = [c for c in category_exclude.split(",") if c]
+        if excluded:
+            filter_clauses.append({"bool": {"must_not": {"terms": {"category": excluded}}}})
     lexical_match: dict[str, Any] | None = None
     if q:
         lexical_match = {
@@ -97,7 +108,7 @@ async def list_content(
         "includes": [
             "subscription_id", "external_id", "type", "title", "url",
             "published_at", "discovered_at", "duration_seconds",
-            "thumbnail_url", "summary", "summary_error_code", "interest_score",
+            "thumbnail_url", "summary", "summary_error_code", "category", "interest_score",
             "user_interest", "consumed", "viewed", "engagement",
         ]
     }
@@ -106,6 +117,7 @@ async def list_content(
         "subscription_id": {"terms": {"field": "subscription_id", "size": 100}},
         "consumed": {"terms": {"field": "consumed", "missing": False}},
         "interest": {"terms": {"field": "user_interest", "size": 10}},
+        "category": {"terms": {"field": "category", "size": 20}},
     }
 
     search_body: dict[str, Any]

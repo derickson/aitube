@@ -106,6 +106,8 @@ Set in `.env`:
 | `ELASTICSEARCH_API_KEY` | | Elasticsearch API key |
 | `ANTHROPIC_API_KEY` | | Claude API key for summaries and ad detection |
 | `JINA_API_KEY` | | Jina API key for Topic Flow clustering embeddings |
+| `OPENROUTER_API_KEY` | | OpenRouter API key for Jev content categorization |
+| `JEV_MODEL` | `~typesafe/jev-latest` | OpenRouter decisions-endpoint model used for categorization |
 | `CONTENT_DLP_URL` | `http://localhost:7055` | content-dlp HTTP service URL |
 | `YOUTUBE_MAX_AGE_DAYS` | `5` | Only poll YouTube videos newer than this |
 | `PODCAST_MAX_AGE_DAYS` | `5` | Only poll podcast episodes newer than this |
@@ -155,6 +157,7 @@ When new content is discovered during polling:
 2. **Podcast episodes:** audio downloaded and transcribed locally via content-dlp. Claude detects ads in the first 90 seconds and sets the playback position to skip past them.
 3. **RSS articles:** full page scraped to markdown via content-dlp webscrape.
 4. **All types:** Claude generates a summary with a bullet-point breakdown of key topics. Videos and podcasts include clickable timestamps that seek the player. Duplicate content items are automatically detected and removed after each poll cycle.
+5. **All types:** OpenRouter's Jev decisions model classifies the item's title/description/summary into one of eight fixed categories (Tabletop RPG, AI and Software, Gadgets and Technology, News, Humor, Science Fiction and Fantasy, Film and Video, Lifestyle), stored as `category`. Items that came through without one get picked up by a bounded backfill pass on the next poll cycle; `backend/scripts/backfill_categories.py` does a one-time full-corpus sweep.
 
 
 ## Topic Flow
@@ -193,7 +196,8 @@ Tunables (in `.env`, all optional):
 
 ## Features
 
-- **Unified timeline** with faceted search (type, watched/unwatched, interest, source) powered by Elasticsearch
+- **Unified timeline** with faceted search (type, watched/unwatched, interest, category, source) powered by Elasticsearch
+- **Content categorization** — every item is classified by OpenRouter's Jev decisions model into one of eight fixed categories (Tabletop RPG, AI and Software, Gadgets and Technology, News, Humor, Science Fiction and Fantasy, Film and Video, Lifestyle). The Category facet is multi-select tri-state: click once to require a category (+), again to mute it (−)
 - **Flyout content viewer** with embedded YouTube player, HTML5 audio player, and distraction-free article reader
 - **Content chat** — ask questions about any content item with streaming AI responses; configurable agents with clickable timestamp citations for video/podcast seek
 - **Timestamped transcripts** with live playback highlighting and click-to-seek
@@ -237,6 +241,7 @@ backend/
       youtube_captions.py # yt-dlp caption fetching
       ad_detector.py     # Claude-powered podcast ad detection
       summarizer.py      # Claude-powered content summaries
+      content_classifier.py # Jev (OpenRouter decisions model) content categorization
       metadata_extractor.py # LLM-powered metadata extraction for ad-hoc content
       content_cleanup.py # Two-stage article cleanup (regex + LLM)
       agents.py          # Agent registry for content chat
@@ -248,6 +253,7 @@ backend/
   scripts/
     poll_feeds.py        # Crontab entry point
     rebuild_clusters.py  # Crontab entry point for Topic Flow rebuilds
+    backfill_categories.py # One-time full-corpus Jev categorization sweep
 frontend/
   public/
     images/              # Pixel art assets (logo, empty states)
@@ -284,7 +290,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/subscriptions/{id}/` | Get subscription |
 | PATCH | `/api/subscriptions/{id}/` | Update subscription |
 | DELETE | `/api/subscriptions/{id}/` | Delete subscription |
-| GET | `/api/content/` | Search content with facets (type, consumed, interest) |
+| GET | `/api/content/` | Search content with facets (type, consumed, interest, category). Filter with `category_include`/`category_exclude` (comma-separated category labels) for the Category facet's +/− states |
 | GET | `/api/content/export/csv/` | Export all content as CSV |
 | GET | `/api/content/{id}/` | Get content item |
 | PUT | `/api/content/{id}/consumed/` | Set consumed status |

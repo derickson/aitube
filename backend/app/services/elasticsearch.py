@@ -102,6 +102,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "summary_error": {"type": "text"},
                 "summary_error_code": {"type": "keyword"},
                 "summary_failed_at": {"type": "date"},
+                "category": {"type": "keyword"},
                 "interest_score": {"type": "float"},
                 "interest_reasoning": {"type": "text"},
                 "transcript": {"type": "object", "enabled": False},
@@ -143,6 +144,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "summary_error": {"type": "text"},
                 "summary_error_code": {"type": "keyword"},
                 "summary_failed_at": {"type": "date"},
+                "category": {"type": "keyword"},
                 "interest_score": {"type": "float"},
                 "interest_reasoning": {"type": "text"},
                 "transcript": {

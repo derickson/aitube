@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     podcast_max_age_days: int = 5
     rss_max_age_days: int = 90
 
+    # Content categorization via OpenRouter's Jev decisions model
+    openrouter_api_key: str = ""
+    jev_model: str = "~typesafe/jev-latest"
+    jev_timeout_seconds: int = 15
+
     # Topic-flow clustering (Jina task=clustering embeddings)
     jina_api_key: str = ""
     jina_embeddings_url: str = "https://api.jina.ai/v1/embeddings"

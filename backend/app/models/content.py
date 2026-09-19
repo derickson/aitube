@@ -44,6 +44,7 @@ class ContentItemSummary(BaseModel):
     thumbnail_url: Optional[str] = ""
     summary: Optional[str] = ""
     summary_error_code: Optional[str] = None
+    category: Optional[str] = None
     interest_score: Optional[float] = None
     user_interest: Optional[str] = None
     consumed: bool = False
@@ -65,6 +66,7 @@ class ContentItem(BaseModel):
     summary: Optional[str] = ""
     summary_error: Optional[str] = None
     summary_error_code: Optional[str] = None
+    category: Optional[str] = None
     interest_score: Optional[float] = None
     interest_reasoning: Optional[str] = ""
     transcript: Optional[Transcript] = None

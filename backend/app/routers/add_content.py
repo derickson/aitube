@@ -139,6 +139,21 @@ def _md5_hash(s: str) -> str:
     return hashlib.md5(s.encode()).hexdigest()[:12]
 
 
+async def _classify(title: str, description: str, summary: str) -> str | None:
+    """Best-effort Jev categorization; never raises. `process_youtube_video_doc`
+    handles this itself for ad-hoc videos, so this only covers podcast/article."""
+    from backend.app.services.content_classifier import classify_content
+
+    try:
+        category, error = await classify_content(title=title, description=description, summary=summary)
+        if error and not category:
+            logger.info("Could not categorize '%s': %s", title[:60], error)
+        return category
+    except Exception as e:
+        logger.warning("Failed to categorize '%s': %s", title[:60], e)
+        return None
+
+
 # --- Endpoints ---
 
 
@@ -445,6 +460,8 @@ async def _process_podcast(url: str, title_override: str | None, submission_sour
             summary_error = str(e)[:300]
             summary_error_code = SummaryErrorCode.UNKNOWN_ERROR
 
+    category = await _classify(title, "", summary)
+
     doc = {
         "subscription_id": "adhoc",
         "submission_source": submission_source,
@@ -457,6 +474,7 @@ async def _process_podcast(url: str, title_override: str | None, submission_sour
         "duration_seconds": duration,
         "thumbnail_url": "",
         "summary": summary,
+        "category": category,
         "interest_score": None,
         "interest_reasoning": "",
         "transcript": transcript,
@@ -549,6 +567,8 @@ async def _process_article(
             summary_error = str(e)[:300]
             summary_error_code = SummaryErrorCode.UNKNOWN_ERROR
 
+    category = await _classify(title, "", summary)
+
     doc = {
         "subscription_id": "adhoc",
         "submission_source": submission_source,
@@ -561,6 +581,7 @@ async def _process_article(
         "duration_seconds": None,
         "thumbnail_url": thumbnail or "",
         "summary": summary,
+        "category": category,
         "interest_score": None,
         "interest_reasoning": "",
         "transcript": None,

@@ -64,12 +64,26 @@ export interface ContentItemSummary {
   thumbnail_url: string;
   summary: string;
   summary_error_code: string | null;
+  category: string | null;
   interest_score: number | null;
   user_interest: "up" | "down" | null;
   consumed: boolean;
   viewed: boolean;
   engagement?: Engagement | null;
 }
+
+// Fixed taxonomy classified by the Jev decisions model — see
+// backend/app/services/content_classifier.py CATEGORY_LABELS (keep in sync).
+export const CATEGORY_LABELS = [
+  "Tabletop RPG",
+  "AI and Software",
+  "Gadgets and Technology",
+  "News",
+  "Humor",
+  "Science Fiction and Fantasy",
+  "Film and Video",
+  "Lifestyle",
+] as const;
 
 export interface ContentItem extends ContentItemSummary {
   interest_reasoning: string;
@@ -163,6 +177,8 @@ export function searchContent(params?: {
   content_type?: ContentType;
   consumed?: "true" | "false";
   interest?: "up" | "down" | "none";
+  category_include?: string;
+  category_exclude?: string;
   q?: string;
   sort?: "date" | "relevance";
   size?: number;
@@ -173,6 +189,8 @@ export function searchContent(params?: {
   if (params?.content_type) search.set("content_type", params.content_type);
   if (params?.consumed) search.set("consumed", params.consumed);
   if (params?.interest) search.set("interest", params.interest);
+  if (params?.category_include) search.set("category_include", params.category_include);
+  if (params?.category_exclude) search.set("category_exclude", params.category_exclude);
   if (params?.q) search.set("q", params.q);
   if (params?.sort) search.set("sort", params.sort);
   if (params?.size !== undefined) search.set("size", String(params.size));

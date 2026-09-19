@@ -232,6 +232,21 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
         except Exception as e:
             logger.warning("Failed to summarize %s: %s", doc.get("title", url), e)
 
+    # Categorize (title/description/summary — cheap, so run even if summarization failed)
+    try:
+        from backend.app.services.content_classifier import classify_content
+        category, category_error = await classify_content(
+            title=doc.get("title", ""),
+            description=doc.get("metadata", {}).get("description", ""),
+            summary=doc.get("summary", ""),
+        )
+        if category:
+            doc["category"] = category
+        elif category_error:
+            logger.info("Could not categorize %s: %s", doc.get("title", url), category_error)
+    except Exception as e:
+        logger.warning("Failed to categorize %s: %s", doc.get("title", url), e)
+
     return doc
 
 
@@ -662,6 +677,20 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                 except Exception as e:
                     logger.warning("Failed to summarize %s: %s", doc["title"], e)
 
+            try:
+                from backend.app.services.content_classifier import classify_content
+                category, category_error = await classify_content(
+                    title=doc.get("title", ""),
+                    description=doc.get("metadata", {}).get("description", ""),
+                    summary=doc.get("summary", ""),
+                )
+                if category:
+                    doc["category"] = category
+                elif category_error:
+                    logger.info("Could not categorize %s: %s", doc["title"], category_error)
+            except Exception as e:
+                logger.warning("Failed to categorize %s: %s", doc["title"], e)
+
         doc_id = str(uuid.uuid4())
         await es.index(
             index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc, **content_index_pipeline()
@@ -1064,6 +1093,59 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
     return backfilled
 
 
+async def backfill_missing_categories(limit: int = 15) -> int:
+    """Categorize recent content items that came through without a `category`
+    (e.g. the classifier call failed or Jev was unconfigured at ingest time).
+
+    Only targets items from the last 5 days, matching backfill_missing_summaries.
+    The one-time full-corpus pass lives in scripts/backfill_categories.py.
+    Processes at most `limit` items per cycle. Returns the number backfilled.
+    """
+    from backend.app.services.content_classifier import classify_content
+
+    es = get_es_client()
+    resp = await es.search(
+        index=CONTENT_ITEMS_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "must": [{"range": {"discovered_at": {"gte": "now-5d"}}}],
+                    "must_not": [{"exists": {"field": "category"}}],
+                }
+            },
+            "_source": ["title", "summary", "metadata"],
+            "size": 200,
+        },
+    )
+
+    hits = resp["hits"]["hits"][:limit]
+    if not hits:
+        return 0
+
+    backfilled = 0
+    for hit in hits:
+        doc_id = hit["_id"]
+        src = hit["_source"]
+        title = src.get("title", "?")
+        try:
+            category, error = await classify_content(
+                title=title,
+                description=(src.get("metadata") or {}).get("description", ""),
+                summary=src.get("summary", ""),
+            )
+            if category:
+                await es.update(index=CONTENT_ITEMS_INDEX, id=doc_id, body={"doc": {"category": category}})
+                backfilled += 1
+            elif error:
+                logger.info("Backfill: could not categorize '%s' (%s): %s", title[:60], doc_id, error)
+        except Exception as e:
+            logger.warning("Backfill category: failed for '%s' (%s): %s", title[:60], doc_id, e)
+
+    if backfilled:
+        logger.info("Backfilled categories for %d item(s)", backfilled)
+    return backfilled
+
+
 async def retry_failed_summaries(hours: int = 48, limit: int = 10) -> int:
     """Retry summaries that previously failed with a retryable, transient error
     (e.g. a Hermes quota cooldown, a timeout, a rate limit).
@@ -1219,6 +1301,9 @@ async def poll_all_active() -> dict[str, list[str]]:
 
     # Retry summaries that failed due to a Hermes GPT-quota cooldown
     await retry_failed_summaries()
+
+    # Categorize recent items that came through without a category
+    await backfill_missing_categories()
 
     content_cache.invalidate()
     return results
