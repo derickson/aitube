@@ -1,3 +1,7 @@
+import asyncio
+import bisect
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -9,6 +13,7 @@ from backend.app.services import content_cache
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
+    QUARANTINE_EVENTS_INDEX,
     get_es_client,
 )
 
@@ -296,6 +301,263 @@ async def predictions(limit: int | None = Query(default=None, le=500)):
         total_unwatched=len(candidates),
         scored=scored,
         unscored=len(candidates) - scored,
+    )
+
+
+class QuarantineEventDetail(BaseModel):
+    content_item_id: str
+    external_id: str | None = None
+    title: str = ""
+    url: str = ""
+    type: str | None = None
+    subscription_id: str | None = None
+    created_at: str
+    discovered_at: str | None = None
+    reason_code: str
+    reason: str = ""
+    source: str | None = None
+    interest_score: float | None = None
+    interest_percentile: float | None = None
+    engagement_score: float | None = None
+    engagement_percentile: float | None = None
+    verdict: str  # "fooled" | "split" | "suspected" | "unscored"
+    interest_reasoning: str = ""
+    summary: str = ""
+    transcript_excerpt_sha256: str | None = None
+    recurrence_count: int = 1
+
+
+class ReasonCount(BaseModel):
+    reason_code: str
+    count: int
+
+
+class WeeklyReasonSeries(BaseModel):
+    reason_code: str
+    counts: list[int]
+
+
+class WeeklyBreakdown(BaseModel):
+    weeks: list[str]
+    series: list[WeeklyReasonSeries]
+
+
+class SubscriptionQuarantineStats(BaseModel):
+    subscription_id: str
+    quarantined: int
+    total_items: int
+    rate: float
+
+
+class QuarantineStatsResponse(BaseModel):
+    generated_at: str
+    total_events: int
+    verdict_counts: dict[str, int]
+    reason_counts: list[ReasonCount]
+    weekly: WeeklyBreakdown
+    subscriptions: list[SubscriptionQuarantineStats]
+    events: list[QuarantineEventDetail]
+
+
+def _percentile_lookup(sorted_values: list[float]):
+    """Returns a fn mapping a value to its percentile rank (0-100) within
+    sorted_values via bisect, so no per-request O(n log n) sort is repeated."""
+    n = len(sorted_values)
+
+    def lookup(value: float | None) -> float | None:
+        if value is None or n == 0:
+            return None
+        return round(bisect.bisect_right(sorted_values, value) / n * 100, 1)
+
+    return lookup
+
+
+def _verdict(interest_pct: float | None, engagement_pct: float | None) -> str:
+    known = [p for p in (interest_pct, engagement_pct) if p is not None]
+    if not known:
+        return "unscored"
+    liked = [p >= 50 for p in known]
+    if all(liked):
+        return "fooled"
+    if not any(liked):
+        return "suspected"
+    return "split"
+
+
+@router.get("/quarantine-stats/", response_model=QuarantineStatsResponse)
+async def quarantine_stats():
+    """Analytics over the quarantine history: how much is getting pulled, why,
+    from where, and whether our own interest/engagement models liked it right
+    before an external judge rejected it. Percentiles are computed against the
+    NON-quarantined population so "above median" means "looked as good as a
+    normal timeline item," not just "high relative to other junk."
+    """
+    es = get_es_client()
+
+    async def _events() -> list[dict[str, Any]]:
+        resp = await es.search(
+            index=QUARANTINE_EVENTS_INDEX,
+            body={
+                "query": {"match_all": {}},
+                "size": 5000,
+                "sort": [{"created_at": {"order": "asc"}}],
+            },
+        )
+        return [hit["_source"] for hit in resp["hits"]["hits"]]
+
+    async def _population() -> tuple[list[float], list[float]]:
+        # Non-quarantined items only, so a quarantined item's percentile means
+        # "how it compares to a normal timeline item."
+        resp = await es.search(
+            index=CONTENT_ITEMS_INDEX,
+            body={
+                "query": {"bool": {"must_not": {"exists": {"field": "quarantined_at"}}}},
+                "size": 10000,
+                "_source": ["interest_score", "engagement.score"],
+            },
+        )
+        hits = [hit["_source"] for hit in resp["hits"]["hits"]]
+        interest = sorted(s["interest_score"] for s in hits if s.get("interest_score") is not None)
+        engagement = sorted(
+            (s.get("engagement") or {}).get("score")
+            for s in hits
+            if (s.get("engagement") or {}).get("score") is not None
+        )
+        return interest, engagement
+
+    async def _totals_by_sub() -> dict[str, int]:
+        resp = await es.search(
+            index=CONTENT_ITEMS_INDEX,
+            body={
+                "query": {"match_all": {}},
+                "size": 0,
+                "aggs": {"by_sub": {"terms": {"field": "subscription_id", "size": 500}}},
+            },
+        )
+        return {b["key"]: b["doc_count"] for b in resp["aggregations"]["by_sub"]["buckets"]}
+
+    # None of these four queries depend on each other except the mget (needs
+    # item_ids from the events query) — kick off events/population/totals
+    # together up front so their Elastic Cloud round-trips overlap.
+    events_task = asyncio.create_task(_events())
+    population_task = asyncio.create_task(_population())
+    totals_task = asyncio.create_task(_totals_by_sub())
+
+    raw_events = await events_task
+    generated_at = datetime.now(timezone.utc).isoformat()
+    if not raw_events:
+        population_task.cancel()
+        totals_task.cancel()
+        return QuarantineStatsResponse(
+            generated_at=generated_at,
+            total_events=0,
+            verdict_counts={"fooled": 0, "split": 0, "suspected": 0, "unscored": 0},
+            reason_counts=[],
+            weekly=WeeklyBreakdown(weeks=[], series=[]),
+            subscriptions=[],
+            events=[],
+        )
+
+    item_ids = sorted({e["content_item_id"] for e in raw_events if e.get("content_item_id")})
+    content_by_id: dict[str, dict[str, Any]] = {}
+    if item_ids:
+        mget_resp = await es.mget(index=CONTENT_ITEMS_INDEX, body={"ids": item_ids})
+        content_by_id = {doc["_id"]: doc["_source"] for doc in mget_resp.get("docs", []) if doc.get("found")}
+
+    (interest_pop, engagement_pop), total_items_by_sub = await asyncio.gather(population_task, totals_task)
+    interest_percentile = _percentile_lookup(interest_pop)
+    engagement_percentile = _percentile_lookup(engagement_pop)
+
+    excerpt_counts = Counter(
+        e["transcript_excerpt_sha256"] for e in raw_events if e.get("transcript_excerpt_sha256")
+    )
+
+    events: list[QuarantineEventDetail] = []
+    verdict_counts = {"fooled": 0, "split": 0, "suspected": 0, "unscored": 0}
+    reason_counter: Counter[str] = Counter()
+    quarantined_by_sub: Counter[str] = Counter()
+    weekly: dict[str, Counter[str]] = {}
+
+    for e in raw_events:
+        item = content_by_id.get(e.get("content_item_id", ""), {})
+        i_score = item.get("interest_score")
+        eng = item.get("engagement") or {}
+        e_score = eng.get("score")
+        i_pct = interest_percentile(i_score)
+        e_pct = engagement_percentile(e_score)
+        verdict = _verdict(i_pct, e_pct)
+        verdict_counts[verdict] += 1
+        reason_code = e.get("reason_code", "unknown")
+        reason_counter[reason_code] += 1
+        sub_id = item.get("subscription_id")
+        if sub_id:
+            quarantined_by_sub[sub_id] += 1
+
+        created_at = e.get("created_at", generated_at)
+        try:
+            week_start = (
+                datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                - timedelta(days=datetime.fromisoformat(created_at.replace("Z", "+00:00")).weekday())
+            ).date().isoformat()
+        except ValueError:
+            week_start = created_at[:10]
+        weekly.setdefault(week_start, Counter())[reason_code] += 1
+
+        excerpt_hash = e.get("transcript_excerpt_sha256")
+        events.append(
+            QuarantineEventDetail(
+                content_item_id=e.get("content_item_id", ""),
+                external_id=e.get("external_id") or item.get("external_id"),
+                title=item.get("title", ""),
+                url=item.get("url", ""),
+                type=item.get("type"),
+                subscription_id=sub_id,
+                created_at=created_at,
+                discovered_at=item.get("discovered_at"),
+                reason_code=reason_code,
+                reason=e.get("reason", ""),
+                source=e.get("source"),
+                interest_score=i_score,
+                interest_percentile=i_pct,
+                engagement_score=e_score,
+                engagement_percentile=e_pct,
+                verdict=verdict,
+                interest_reasoning=item.get("interest_reasoning", ""),
+                summary=item.get("summary", ""),
+                transcript_excerpt_sha256=excerpt_hash,
+                recurrence_count=excerpt_counts.get(excerpt_hash, 1) if excerpt_hash else 1,
+            )
+        )
+
+    weeks_sorted = sorted(weekly.keys())
+    reason_codes_sorted = [rc for rc, _ in reason_counter.most_common()]
+    weekly_series = [
+        WeeklyReasonSeries(
+            reason_code=rc,
+            counts=[weekly[w].get(rc, 0) for w in weeks_sorted],
+        )
+        for rc in reason_codes_sorted
+    ]
+
+    subscriptions = [
+        SubscriptionQuarantineStats(
+            subscription_id=sub_id,
+            quarantined=count,
+            total_items=total_items_by_sub.get(sub_id, count),
+            rate=round(count / total_items_by_sub[sub_id], 3) if total_items_by_sub.get(sub_id) else 1.0,
+        )
+        for sub_id, count in quarantined_by_sub.items()
+    ]
+    subscriptions.sort(key=lambda s: (s.rate, s.quarantined), reverse=True)
+
+    return QuarantineStatsResponse(
+        generated_at=generated_at,
+        total_events=len(raw_events),
+        verdict_counts=verdict_counts,
+        reason_counts=[ReasonCount(reason_code=rc, count=c) for rc, c in reason_counter.most_common()],
+        weekly=WeeklyBreakdown(weeks=weeks_sorted, series=weekly_series),
+        subscriptions=subscriptions,
+        events=events,
     )
 
 

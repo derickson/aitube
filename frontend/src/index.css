@@ -124,6 +124,42 @@ body {
   color: var(--accent);
 }
 
+.settings-menu {
+  position: relative;
+}
+
+.settings-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 0.35rem;
+  z-index: 50;
+}
+
+.settings-dropdown a {
+  text-decoration: none;
+  color: var(--text);
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.settings-dropdown a:hover {
+  background: var(--bg-secondary);
+}
+
+.settings-dropdown a.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 main {
   max-width: 1400px;
   margin: 0 auto;
@@ -132,6 +168,208 @@ main {
 
 main:has(.flyout-open) {
   max-width: 100%;
+}
+
+/* Quarantine analytics page */
+
+.quarantine-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  padding-bottom: 3rem;
+}
+
+.quarantine-header h2 {
+  font-size: 1.4rem;
+}
+
+.quarantine-sub,
+.quarantine-chart-caption {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.quarantine-verdict-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.quarantine-verdict-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  color: var(--text);
+  min-width: 9rem;
+  text-align: left;
+}
+
+.quarantine-verdict-chip strong {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.quarantine-verdict-chip span:nth-child(2) {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.quarantine-verdict-hint {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.quarantine-verdict-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.quarantine-verdict-chip.verdict-fooled strong { color: var(--danger); }
+.quarantine-verdict-chip.verdict-suspected strong { color: var(--success); }
+.quarantine-verdict-chip.verdict-split strong { color: var(--warning); }
+.quarantine-verdict-chip.verdict-unscored strong { color: var(--text-secondary); }
+
+.quarantine-chart-block {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.quarantine-chart-block h3 {
+  font-size: 1rem;
+}
+
+.quarantine-chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .quarantine-chart-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quarantine-ledger {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+}
+
+.quarantine-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+}
+
+.quarantine-table th {
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.quarantine-table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.quarantine-row {
+  cursor: pointer;
+}
+
+.quarantine-row:hover {
+  background: var(--bg-secondary);
+}
+
+.quarantine-row.expanded {
+  background: var(--bg-secondary);
+}
+
+.quarantine-title-cell a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.quarantine-title-cell a:hover {
+  text-decoration: underline;
+}
+
+.quarantine-recurrence {
+  margin-left: 0.4rem;
+  color: var(--warning);
+  font-size: 0.75rem;
+}
+
+.quarantine-reason-chip {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.quarantine-verdict-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.quarantine-verdict-badge.verdict-fooled { color: var(--danger); }
+.quarantine-verdict-badge.verdict-suspected { color: var(--success); }
+.quarantine-verdict-badge.verdict-split { color: var(--warning); }
+.quarantine-verdict-badge.verdict-unscored { color: var(--text-secondary); }
+
+.quarantine-detail-row td {
+  background: var(--bg-secondary);
+}
+
+.quarantine-detail {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.quarantine-detail h4 {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+}
+
+.quarantine-detail-summary {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  border-top: 1px dashed var(--border);
+  padding-top: 0.5rem;
+}
+
+.quarantine-show-all {
+  margin-top: 0.75rem;
+  background: var(--bg);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
 }
 
 /* Buttons */

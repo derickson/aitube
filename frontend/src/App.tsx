@@ -6,8 +6,10 @@ import { Search } from "./components/Search";
 import { TopicFlow } from "./components/TopicFlow";
 import { Prediction } from "./components/Prediction";
 import { SubscriptionManager } from "./components/SubscriptionManager";
+import { QuarantinePage } from "./components/QuarantinePage";
 import { NotFound } from "./components/NotFound";
 import { ThemeToggle } from "./theme/ThemeToggle";
+import { SettingsMenu } from "./components/SettingsMenu";
 import { getInitialTheme, applyTheme } from "./theme/theme";
 import type { Theme } from "./theme/theme";
 
@@ -35,9 +37,9 @@ function AppContent() {
           <NavLink to="/search/">Search</NavLink>
           <NavLink to="/topic-flow/">Topic Flow</NavLink>
           <NavLink to="/prediction/">Prediction</NavLink>
-          <NavLink to="/subscriptions/">Subscriptions</NavLink>
         </nav>
         <ThemeToggle theme={theme} onToggle={handleToggle} />
+        <SettingsMenu />
       </header>
       <main>
         <Routes>
@@ -47,6 +49,7 @@ function AppContent() {
           <Route path="/prediction/" element={<Prediction />} />
           <Route path="/subscriptions/" element={<SubscriptionManager />} />
           <Route path="/add-content/" element={<SubscriptionManager />} />
+          <Route path="/quarantine/" element={<QuarantinePage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

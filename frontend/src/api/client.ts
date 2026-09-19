@@ -360,6 +360,67 @@ export function getTopicFlowClusterItems(
   return apiFetch(`/topic-flow/cluster/${encodeURIComponent(clusterId)}/items/?${qs}`);
 }
 
+// --- Quarantine ---
+
+export interface QuarantineEventDetail {
+  content_item_id: string;
+  external_id: string | null;
+  title: string;
+  url: string;
+  type: ContentType | null;
+  subscription_id: string | null;
+  created_at: string;
+  discovered_at: string | null;
+  reason_code: string;
+  reason: string;
+  source: string | null;
+  interest_score: number | null;
+  interest_percentile: number | null;
+  engagement_score: number | null;
+  engagement_percentile: number | null;
+  verdict: "fooled" | "split" | "suspected" | "unscored";
+  interest_reasoning: string;
+  summary: string;
+  transcript_excerpt_sha256: string | null;
+  recurrence_count: number;
+}
+
+export interface ReasonCount {
+  reason_code: string;
+  count: number;
+}
+
+export interface WeeklyReasonSeries {
+  reason_code: string;
+  counts: number[];
+}
+
+export interface WeeklyBreakdown {
+  weeks: string[];
+  series: WeeklyReasonSeries[];
+}
+
+export interface SubscriptionQuarantineStats {
+  subscription_id: string;
+  quarantined: number;
+  total_items: number;
+  rate: number;
+}
+
+export interface QuarantineStatsResponse {
+  generated_at: string;
+  total_events: number;
+  verdict_counts: Record<"fooled" | "split" | "suspected" | "unscored", number>;
+  reason_counts: ReasonCount[];
+  weekly: WeeklyBreakdown;
+  subscriptions: SubscriptionQuarantineStats[];
+  events: QuarantineEventDetail[];
+}
+
+export function getQuarantineStats(): Promise<QuarantineStatsResponse> {
+  return apiFetch("/content/quarantine-stats/");
+}
+
 export function ingestContent(
   url: string,
   title?: string,
