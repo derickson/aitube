@@ -573,10 +573,9 @@ export interface DeclineSeries {
 }
 
 export interface ConfusionMatrix {
-  true_positive: number;
-  false_positive: number;
-  false_negative: number;
-  true_negative: number;
+  predicted_order: string[];
+  actual_order: string[];
+  counts: number[][];
 }
 
 export interface Calibration {
@@ -585,6 +584,18 @@ export interface Calibration {
   accuracy: number | null;
   precision: number | null;
   recall: number | null;
+}
+
+export interface CategoryQualityRow {
+  category: string;
+  n: number;
+  accuracy: number | null;
+  precision: number | null;
+  recall: number | null;
+}
+
+export interface CategoryQuality {
+  rows: CategoryQualityRow[];
 }
 
 export interface EngagementReport {
@@ -600,6 +611,7 @@ export interface EngagementReport {
   decline_strict: DeclineSeries;
   decline_broad: DeclineSeries;
   calibration: Calibration;
+  category_quality: CategoryQuality;
 }
 
 export function getEngagementReport(): Promise<EngagementReport> {

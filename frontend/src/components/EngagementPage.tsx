@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   getEngagementReport,
+  CATEGORY_LABELS,
   type CohortKey,
   type EngagementChannel,
   type EngagementReport,
@@ -399,57 +400,132 @@ function DeclineChart({ report, variant }: { report: EngagementReport; variant: 
   return <div ref={ref} />;
 }
 
+const PREDICTED_TRANCHE_LABELS: Record<string, string> = {
+  confident_engaged: "Confident: engaged (≥75%)",
+  leaning_engaged: "Leaning engaged (50–75%)",
+  leaning_not_engaged: "Leaning not engaged (25–50%)",
+  confident_not_engaged: "Confident: not engaged (<25%)",
+};
+
+// Shared "how good is this" gradient: red (worst) -> amber -> olive -> green
+// (best), so low values read as a clear warning rather than a paler green.
+// t=0 -> red, t=1 -> green; used both continuously (quality table) and
+// discretely (confusion matrix, indexed by rank distance).
+const QUALITY_RGB: Array<[number, number, number]> = [
+  [220, 38, 38],
+  [217, 119, 6],
+  [101, 163, 13],
+  [22, 163, 74],
+];
+
+function qualityColor(t: number, alpha: number): string {
+  const scaled = Math.max(0, Math.min(1, t)) * (QUALITY_RGB.length - 1);
+  const i = Math.min(QUALITY_RGB.length - 2, Math.floor(scaled));
+  const f = scaled - i;
+  const [r1, g1, b1] = QUALITY_RGB[i];
+  const [r2, g2, b2] = QUALITY_RGB[i + 1];
+  const r = Math.round(r1 + (r2 - r1) * f);
+  const g = Math.round(g1 + (g2 - g1) * f);
+  const b = Math.round(b1 + (b2 - b1) * f);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function PredictionConfusionMatrix({ report }: { report: EngagementReport }) {
   const cal = report.calibration;
   if (!cal.matrix) {
     return <p className="engagement-chart-caption">Not enough scored items yet to build a confusion matrix.</p>;
   }
-  const { true_positive: tp, false_positive: fp, false_negative: fn, true_negative: tn } = cal.matrix;
-  const total = tp + fp + fn + tn;
+  const { predicted_order, actual_order, counts } = cal.matrix;
+  const total = counts.reduce((sum, row) => sum + row.reduce((a, b) => a + b, 0), 0);
   const pct = (n: number) => (total ? `${((n / total) * 100).toFixed(0)}%` : "0%");
-  // Correct cells (tp/tn) shade green by their share of the matrix; incorrect
-  // cells (fp/fn) shade red the same way, so the eye reads "how much of this
-  // page is green" as accuracy at a glance.
-  const shade = (n: number, correct: boolean) => {
-    const alpha = total ? Math.min(0.85, 0.12 + (n / total) * 0.9) : 0.12;
-    return correct ? `rgba(22, 163, 74, ${alpha})` : `rgba(220, 38, 38, ${alpha})`;
-  };
-
-  const cells: Array<{ key: string; label: string; n: number; correct: boolean }> = [
-    { key: "tp", label: "True positive", n: tp, correct: true },
-    { key: "fp", label: "False positive", n: fp, correct: false },
-    { key: "fn", label: "False negative", n: fn, correct: false },
-    { key: "tn", label: "True negative", n: tn, correct: true },
-  ];
 
   return (
     <div>
-      <div className="engagement-confusion-grid">
+      <div
+        className="engagement-confusion-grid"
+        style={{ gridTemplateColumns: `max-content repeat(${actual_order.length}, 1fr)` }}
+      >
         <div />
-        <div className="engagement-confusion-axis-label">Actual: engaged</div>
-        <div className="engagement-confusion-axis-label">Actual: not engaged</div>
-        <div className="engagement-confusion-axis-label engagement-confusion-axis-label-row">Predicted: engaged</div>
-        {cells.slice(0, 2).map((c) => (
-          <div key={c.key} className="engagement-confusion-cell" style={{ background: shade(c.n, c.correct) }}>
-            <span className="engagement-confusion-count">{c.n}</span>
-            <span className="engagement-confusion-label">{c.label} · {pct(c.n)}</span>
+        {actual_order.map((a) => (
+          <div key={a} className="engagement-confusion-axis-label engagement-confusion-axis-label-col">
+            {BUCKET_LABELS[a as BucketKey] ?? a}
           </div>
         ))}
-        <div className="engagement-confusion-axis-label engagement-confusion-axis-label-row">Predicted: not engaged</div>
-        {cells.slice(2, 4).map((c) => (
-          <div key={c.key} className="engagement-confusion-cell" style={{ background: shade(c.n, c.correct) }}>
-            <span className="engagement-confusion-count">{c.n}</span>
-            <span className="engagement-confusion-label">{c.label} · {pct(c.n)}</span>
-          </div>
+        {predicted_order.map((p, pi) => (
+          <Fragment key={p}>
+            <div className="engagement-confusion-axis-label engagement-confusion-axis-label-row">
+              {PREDICTED_TRANCHE_LABELS[p] ?? p}
+            </div>
+            {actual_order.map((a, ai) => {
+              const n = counts[pi][ai];
+              const maxDiff = predicted_order.length - 1;
+              const diff = Math.min(maxDiff, Math.abs(pi - ai));
+              const share = total ? n / total : 0;
+              const alpha = total ? Math.min(0.85, 0.12 + share * 0.9) : 0.12;
+              return (
+                <div
+                  key={a}
+                  className="engagement-confusion-cell"
+                  style={{ background: qualityColor(1 - diff / maxDiff, alpha) }}
+                >
+                  <span className="engagement-confusion-count">{n}</span>
+                  <span className="engagement-confusion-label">{pct(n)}</span>
+                </div>
+              );
+            })}
+          </Fragment>
         ))}
       </div>
       <p className="engagement-chart-caption">
-        n = {cal.n} scored, non-pending, non-quarantined videos.
-        {cal.accuracy != null && ` Accuracy ${(cal.accuracy * 100).toFixed(0)}%`}
+        n = {cal.n} scored, non-pending, non-quarantined videos. Rows are confidence tranches of the raw score;
+        columns are the same positive/negative outcome buckets used elsewhere on this page. Green = prediction and
+        outcome landed in matching tranches, red = they were on opposite ends.
+        {cal.accuracy != null && ` Binary accuracy (≥50% threshold) ${(cal.accuracy * 100).toFixed(0)}%`}
         {cal.precision != null && ` · Precision ${(cal.precision * 100).toFixed(0)}%`}
         {cal.recall != null && ` · Recall ${(cal.recall * 100).toFixed(0)}%`}
       </p>
     </div>
+  );
+}
+
+const CATEGORY_ROW_ORDER = [...CATEGORY_LABELS, "Uncategorized"];
+
+function CategoryQualityTable({ report }: { report: EngagementReport }) {
+  const rows = report.category_quality.rows
+    .filter((r) => r.n > 0)
+    .sort((a, b) => CATEGORY_ROW_ORDER.indexOf(a.category) - CATEGORY_ROW_ORDER.indexOf(b.category));
+
+  if (rows.length === 0) {
+    return <p className="engagement-chart-caption">No scored, categorized items yet.</p>;
+  }
+
+  // Red -> green by metric value, so a bad cell reads as a warning, not a paler good one.
+  const heat = (v: number | null) => (v == null ? undefined : qualityColor(v, 0.55));
+  const fmt = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(0)}%`);
+
+  return (
+    <table className="engagement-leaderboard">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>n</th>
+          <th>Accuracy</th>
+          <th>Precision</th>
+          <th>Recall</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.category} style={r.accuracy == null ? { opacity: 0.55 } : undefined}>
+            <td>{r.category}</td>
+            <td>{r.n}</td>
+            <td style={{ background: heat(r.accuracy) }}>{r.accuracy == null ? "too few (n<10)" : fmt(r.accuracy)}</td>
+            <td style={{ background: heat(r.precision) }}>{fmt(r.precision)}</td>
+            <td style={{ background: heat(r.recall) }}>{fmt(r.recall)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -732,6 +808,14 @@ export function EngagementPage() {
           Does the ML engagement classifier's predicted score (≥50% = predicted engaged) match what actually happens? Scored items only.
         </p>
         <PredictionConfusionMatrix report={report} />
+      </details>
+
+      <details className="engagement-details">
+        <summary>Prediction quality by category</summary>
+        <p className="engagement-chart-caption">
+          Same accuracy/precision/recall as above, sliced by Jev's content category — is the classifier worse on any particular kind of content?
+        </p>
+        <CategoryQualityTable report={report} />
       </details>
 
       <details id="engagement-notes" className="engagement-details">

@@ -27,6 +27,8 @@ from typing import Any
 import numpy as np
 from scipy import stats as sstats
 
+from backend.app.services.content_classifier import CATEGORY_LABELS
+
 # ---- thresholds (see methodology: each is a deliberate, justified choice) ----
 
 NEGLIGIBLE_MAX_SECONDS = 60.0  # below any plausible real watch, above 5s-rounding noise
@@ -251,6 +253,7 @@ class ItemFrame:
     ev: float
     cohort: str
     channel: tuple[str, str]
+    category: str | None
 
 
 def calibrate_settle_days(lag_days: list[float]) -> int:
@@ -299,6 +302,7 @@ def build_item_frame(
 
     engagement_score = (src.get("engagement") or {}).get("score")
     interest_score = src.get("interest_score")
+    category = src.get("category")
 
     if item_type == "article":
         state = classify_article_state(quarantined=quarantined, vote=vote, consumed=consumed, settled=settled)
@@ -321,6 +325,7 @@ def build_item_frame(
         vote=vote, consumed=consumed, viewed=viewed,
         engagement_score=engagement_score, interest_score=interest_score,
         settled=settled, state=state, bucket=bucket, ev=ev, cohort=cohort, channel=ckey,
+        category=category,
     )
 
 
@@ -754,23 +759,44 @@ def compute_decline_series(
 
 # ---- prediction calibration ----
 
+# Rows: engagement.score split into four confidence tranches, quartile-width
+# bands straddling the 0.5 threshold that /api/content/predictions/ and the
+# binary accuracy/precision/recall below both use — so "leaning" means within
+# 25pp of the decision boundary and "confident" means beyond it.
+PREDICTED_TRANCHE_ORDER = ["confident_engaged", "leaning_engaged", "leaning_not_engaged", "confident_not_engaged"]
+# Columns: the same positive/leaning_positive/leaning_negative/negative actual
+# outcome buckets used everywhere else on this page (STATE_BUCKET), ordered
+# most-positive to most-negative to match the rows above.
+ACTUAL_BUCKET_ORDER = ["positive", "leaning_positive", "leaning_negative", "negative"]
+
+
+def _predicted_tranche(score: float) -> str:
+    if score >= 0.75:
+        return "confident_engaged"
+    if score >= 0.5:
+        return "leaning_engaged"
+    if score >= 0.25:
+        return "leaning_not_engaged"
+    return "confident_not_engaged"
+
 
 def compute_calibration(video_items: list[ItemFrame]) -> dict[str, Any]:
-    """Predicted-vs-actual confusion matrix for the ML engagement classifier.
+    """Predicted-confidence x actual-outcome matrix for the ML engagement classifier.
 
-    Predicted positive uses the same score >= 0.5 threshold as
-    `/api/content/predictions/` (engagement.prediction isn't consulted here
-    since we only have the raw score on ItemFrame). Actual positive is
-    state in POSITIVE_STATES, the same definition the old reliability curve
-    used for "observed positive rate".
+    `scored` already excludes PENDING/QUARANTINED items, so every item's
+    `bucket` (from STATE_BUCKET) is one of ACTUAL_BUCKET_ORDER's four values
+    — "excluded" never appears as a column here.
     """
     scored = [i for i in video_items if i.engagement_score is not None and i.state != "PENDING" and not i.quarantined]
     n = len(scored)
     if n < 20:
         return {"matrix": None, "n": n, "accuracy": None, "precision": None, "recall": None}
 
+    counts = {p: {a: 0 for a in ACTUAL_BUCKET_ORDER} for p in PREDICTED_TRANCHE_ORDER}
     tp = fp = fn = tn = 0
     for i in scored:
+        counts[_predicted_tranche(i.engagement_score)][i.bucket] += 1
+
         predicted_positive = i.engagement_score >= 0.5
         actual_positive = i.state in POSITIVE_STATES
         if predicted_positive and actual_positive:
@@ -783,9 +809,57 @@ def compute_calibration(video_items: list[ItemFrame]) -> dict[str, Any]:
             tn += 1
 
     return {
-        "matrix": {"true_positive": tp, "false_positive": fp, "false_negative": fn, "true_negative": tn},
+        "matrix": {
+            "predicted_order": PREDICTED_TRANCHE_ORDER,
+            "actual_order": ACTUAL_BUCKET_ORDER,
+            "counts": [[counts[p][a] for a in ACTUAL_BUCKET_ORDER] for p in PREDICTED_TRANCHE_ORDER],
+        },
         "n": n,
         "accuracy": (tp + tn) / n,
         "precision": tp / (tp + fp) if (tp + fp) else None,
         "recall": tp / (tp + fn) if (tp + fn) else None,
     }
+
+
+MIN_CATEGORY_N = 10  # below this, per-category accuracy/precision/recall is too noisy to show
+
+
+def compute_category_quality(video_items: list[ItemFrame]) -> dict[str, Any]:
+    """Same binary prediction-quality metrics as compute_calibration, sliced
+    per Jev category, to see whether the classifier is especially good/bad
+    on a particular kind of content. Row order is CATEGORY_LABELS (fixed
+    taxonomy from content_classifier.py) plus a trailing "Uncategorized" row
+    for items Jev hasn't classified yet (pending backfill)."""
+    scored = [i for i in video_items if i.engagement_score is not None and i.state != "PENDING" and not i.quarantined]
+
+    by_category: dict[str, list[ItemFrame]] = defaultdict(list)
+    for i in scored:
+        by_category[i.category or "Uncategorized"].append(i)
+
+    rows = []
+    for label in [*CATEGORY_LABELS, "Uncategorized"]:
+        items = by_category.get(label, [])
+        n = len(items)
+        if n < MIN_CATEGORY_N:
+            rows.append({"category": label, "n": n, "accuracy": None, "precision": None, "recall": None})
+            continue
+        tp = fp = fn = tn = 0
+        for i in items:
+            predicted_positive = i.engagement_score >= 0.5
+            actual_positive = i.state in POSITIVE_STATES
+            if predicted_positive and actual_positive:
+                tp += 1
+            elif predicted_positive:
+                fp += 1
+            elif actual_positive:
+                fn += 1
+            else:
+                tn += 1
+        rows.append({
+            "category": label,
+            "n": n,
+            "accuracy": (tp + tn) / n,
+            "precision": tp / (tp + fp) if (tp + fp) else None,
+            "recall": tp / (tp + fn) if (tp + fn) else None,
+        })
+    return {"rows": rows}

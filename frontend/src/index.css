@@ -2889,18 +2889,23 @@ main:has(.flyout-open) {
 
 .engagement-confusion-grid {
   display: grid;
-  grid-template-columns: max-content 1fr 1fr;
   gap: 0.4rem;
-  max-width: 32rem;
+  max-width: 46rem;
   margin-top: 0.5rem;
 }
 
 .engagement-confusion-axis-label {
   display: flex;
   align-items: center;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-secondary);
+  line-height: 1.25;
+}
+
+.engagement-confusion-axis-label-col {
+  justify-content: center;
+  text-align: center;
 }
 
 .engagement-confusion-axis-label-row {
@@ -2916,12 +2921,12 @@ main:has(.flyout-open) {
   gap: 0.15rem;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.9rem 0.6rem;
+  padding: 0.6rem 0.4rem;
   text-align: center;
 }
 
 .engagement-confusion-count {
-  font-size: 1.4rem;
+  font-size: 1.1rem;
   font-weight: 700;
 }
 

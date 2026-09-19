@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/engagement", tags=["engagement"])
 _SOURCE_FIELDS = [
     "type", "title", "url", "subscription_id", "submission_source", "metadata.author",
     "duration_seconds", "quarantined_at", "quarantine_source", "user_interest",
-    "consumed", "viewed", "discovered_at", "engagement.score", "interest_score",
+    "consumed", "viewed", "discovered_at", "engagement.score", "interest_score", "category",
 ]
 
 
@@ -128,10 +128,9 @@ class DeclineOut(BaseModel):
 
 
 class ConfusionMatrixOut(BaseModel):
-    true_positive: int
-    false_positive: int
-    false_negative: int
-    true_negative: int
+    predicted_order: list[str]
+    actual_order: list[str]
+    counts: list[list[int]]
 
 
 class CalibrationOut(BaseModel):
@@ -140,6 +139,18 @@ class CalibrationOut(BaseModel):
     accuracy: float | None = None
     precision: float | None = None
     recall: float | None = None
+
+
+class CategoryQualityRowOut(BaseModel):
+    category: str
+    n: int
+    accuracy: float | None = None
+    precision: float | None = None
+    recall: float | None = None
+
+
+class CategoryQualityOut(BaseModel):
+    rows: list[CategoryQualityRowOut]
 
 
 class EngagementReportResponse(BaseModel):
@@ -155,6 +166,7 @@ class EngagementReportResponse(BaseModel):
     decline_strict: DeclineOut
     decline_broad: DeclineOut
     calibration: CalibrationOut
+    category_quality: CategoryQualityOut
 
 
 @router.get("/report/", response_model=EngagementReportResponse)
@@ -262,6 +274,7 @@ async def engagement_report():
     decline_strict = ea.compute_decline_series(video_items, now, settle_days, broad=False)
     decline_broad = ea.compute_decline_series(video_items, now, settle_days, broad=True)
     calibration = ea.compute_calibration(video_items)
+    category_quality = ea.compute_category_quality(video_items)
 
     return EngagementReportResponse(
         generated_at=now.isoformat(),
@@ -276,5 +289,6 @@ async def engagement_report():
         decline_strict=DeclineOut(**decline_strict),
         decline_broad=DeclineOut(**decline_broad),
         calibration=calibration,
+        category_quality=category_quality,
     )
 
