@@ -61,6 +61,9 @@ export function SettingsMenu() {
           <NavLink to="/watch-time/" role="menuitem" onClick={close}>
             Watch Time
           </NavLink>
+          <NavLink to="/engagement/" role="menuitem" onClick={close}>
+            Engagement
+          </NavLink>
         </div>
       )}
     </div>

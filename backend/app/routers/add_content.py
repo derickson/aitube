@@ -293,7 +293,7 @@ async def confirm_content(request: ConfirmRequest):
 
     # Fire background task
     task = asyncio.create_task(
-        _process_content(url, detected_type, request.title_override, cached)
+        _process_content(url, detected_type, request.title_override, cached, "manual_ui")
     )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -332,7 +332,7 @@ async def ingest_content(request: IngestRequest):
 
     # Fire background task with empty cached data (no preview step)
     task = asyncio.create_task(
-        _process_content(url, detected_type, request.title, {})
+        _process_content(url, detected_type, request.title, {}, "api_ingest")
     )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -341,21 +341,25 @@ async def ingest_content(request: IngestRequest):
 
 
 async def _process_content(
-    url: str, detected_type: str, title_override: str | None, cached: dict
+    url: str,
+    detected_type: str,
+    title_override: str | None,
+    cached: dict,
+    submission_source: str,
 ) -> None:
     """Background task: process submitted content through the appropriate pipeline."""
     try:
         if detected_type == "video":
-            await _process_video(url, title_override)
+            await _process_video(url, title_override, submission_source)
         elif detected_type == "podcast_episode":
-            await _process_podcast(url, title_override)
+            await _process_podcast(url, title_override, submission_source)
         else:
-            await _process_article(url, title_override, cached)
+            await _process_article(url, title_override, cached, submission_source)
     except Exception:
         logger.exception("Failed to process ad-hoc %s: %s", detected_type, url)
 
 
-async def _process_video(url: str, title_override: str | None) -> None:
+async def _process_video(url: str, title_override: str | None, submission_source: str) -> None:
     from backend.app.services.feed_poller import (
         build_adhoc_youtube_doc,
         process_youtube_video_doc,
@@ -367,6 +371,7 @@ async def _process_video(url: str, title_override: str | None) -> None:
     video_id = vid_match.group(1)
 
     doc = build_adhoc_youtube_doc(video_id, url)
+    doc["submission_source"] = submission_source
     if title_override:
         doc["title"] = title_override
 
@@ -387,7 +392,7 @@ async def _process_video(url: str, title_override: str | None) -> None:
     logger.info("Indexed ad-hoc video '%s' as %s", enriched.get("title", url), doc_id)
 
 
-async def _process_podcast(url: str, title_override: str | None) -> None:
+async def _process_podcast(url: str, title_override: str | None, submission_source: str) -> None:
     from backend.app.services.metadata_extractor import extract_podcast_metadata
     from backend.app.services.summarizer import summarize_content
 
@@ -442,6 +447,7 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
 
     doc = {
         "subscription_id": "adhoc",
+        "submission_source": submission_source,
         "external_id": f"adhoc_podcast_{_md5_hash(url)}",
         "type": "podcast_episode",
         "title": title,
@@ -477,7 +483,9 @@ async def _process_podcast(url: str, title_override: str | None) -> None:
     logger.info("Indexed ad-hoc podcast '%s' as %s", title, doc_id)
 
 
-async def _process_article(url: str, title_override: str | None, cached: dict) -> None:
+async def _process_article(
+    url: str, title_override: str | None, cached: dict, submission_source: str
+) -> None:
     from backend.app.services.content_cleanup import cleanup_article_markdown
     from backend.app.services.metadata_extractor import extract_article_metadata
     from backend.app.services.summarizer import summarize_content
@@ -543,6 +551,7 @@ async def _process_article(url: str, title_override: str | None, cached: dict) -
 
     doc = {
         "subscription_id": "adhoc",
+        "submission_source": submission_source,
         "external_id": f"adhoc_article_{_md5_hash(url)}",
         "type": "article",
         "title": title,

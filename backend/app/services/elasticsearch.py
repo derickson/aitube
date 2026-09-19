@@ -89,6 +89,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
         "mappings": {
             "properties": {
                 "subscription_id": {"type": "keyword"},
+                "submission_source": {"type": "keyword"},
                 "external_id": {"type": "keyword"},
                 "type": {"type": "keyword"},
                 "title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
@@ -125,6 +126,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
         "mappings": {
             "properties": {
                 "subscription_id": {"type": "keyword"},
+                "submission_source": {"type": "keyword"},
                 "external_id": {"type": "keyword"},
                 "type": {"type": "keyword"},
                 "title": {

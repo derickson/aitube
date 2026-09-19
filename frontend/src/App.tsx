@@ -8,6 +8,7 @@ import { Prediction } from "./components/Prediction";
 import { SubscriptionManager } from "./components/SubscriptionManager";
 import { QuarantinePage } from "./components/QuarantinePage";
 import { WatchTimePage } from "./components/WatchTimePage";
+import { EngagementPage } from "./components/EngagementPage";
 import { NotFound } from "./components/NotFound";
 import { ThemeToggle } from "./theme/ThemeToggle";
 import { SettingsMenu } from "./components/SettingsMenu";
@@ -52,6 +53,7 @@ function AppContent() {
           <Route path="/add-content/" element={<SubscriptionManager />} />
           <Route path="/quarantine/" element={<QuarantinePage />} />
           <Route path="/watch-time/" element={<WatchTimePage />} />
+          <Route path="/engagement/" element={<EngagementPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

@@ -206,7 +206,7 @@ Tunables (in `.env`, all optional):
 - **Ad skip** for podcasts — Claude detects sponsor reads and sets playback past them
 - **Smart URL resolution** for YouTube channels, Apple Podcasts, Spotify, and RSS discovery
 - **Light/dark theme** toggle
-- **Settings menu** (gear icon, top right, next to the theme toggle) — houses **Content** (subscription management, formerly its own nav tab), **Quarantine** (analytics on items the external transcript judge rejected: a blind-spot map plotting each item's interest-model and engagement-classifier percentiles against the non-quarantined population — to see whether our own models were fooled — plus reason and channel breakdowns, a weekly timeline, and a drill-down ledger), and **Watch Time** (minutes watched per hour, today vs. yesterday, with a by-content-type breakdown; auto-refreshes while open)
+- **Settings menu** (gear icon, top right, next to the theme toggle) — houses **Content** (subscription management, formerly its own nav tab), **Quarantine** (analytics on items the external transcript judge rejected: a blind-spot map plotting each item's interest-model and engagement-classifier percentiles against the non-quarantined population — to see whether our own models were fooled — plus reason and channel breakdowns, a weekly timeline, and a drill-down ledger), **Watch Time** (minutes watched per hour, today vs. yesterday, with a by-content-type breakdown; auto-refreshes while open), and **Engagement** (who am I actually engaging with, by channel: a 13-state outcome classification per video item — COMPLETED through REJECTED, PASSED_OVER, DISMISSED — rolled up into positive/negative rates per channel with Bayesian small-sample shrinkage, Wilson confidence intervals, and Fisher-exact + Benjamini-Hochberg significance vs. the corpus baseline; leaderboards for most-engaging and most-rejected channels; a cohort split comparing real subscriptions against ad-hoc videos recommended by aitube-sync vs. ones pasted in manually; and a "voted up, but not watched here" decline tracker with a Cochran-Armitage trend test)
 - **Ad-hoc content** — add any YouTube video, podcast MP3, or web article directly via the Add Content page with metadata preview before processing
 - **Subscription management** with per-feed interest notes, type-colored cards, search, and filters
 - **Topic Flow** — unsupervised clustering of the recent corpus (Jina v5 clustering-task embeddings, density-probed centroid seeds, Hermes-written ≤5-word topic titles). Tab shows a UMAP cluster map and a "topic story chains" flow diagram (per-cluster ribbons over time, shared colors) above selectable topic cards
@@ -223,6 +223,7 @@ backend/
       content.py         # Search, facets, CSV export, interest, consumed, viewed
       consumption_report.py # Engagement report endpoint
       consumption_stats.py # Watch-time-per-hour analytics (backs the settings menu's Watch Time page)
+      engagement.py       # Per-channel engagement analytics (backs the settings menu's Engagement page)
       playback.py        # Position tracking
       polling.py         # Feed poll triggers
       chat.py            # Streaming content Q&A with agents
@@ -240,6 +241,7 @@ backend/
       content_cleanup.py # Two-stage article cleanup (regex + LLM)
       agents.py          # Agent registry for content chat
       watch_time_tracker.py # Diffs playhead positions into hourly watch-minutes buckets
+      engagement_analysis.py # Outcome classification, shrinkage/significance stats, decline trend (pure — no ES I/O)
       jina_embeddings.py # Jina API client (task=clustering)
       clustering.py      # Topic Flow pipeline (embed, seed, classify, label, UMAP)
     models/              # Pydantic schemas
@@ -262,7 +264,8 @@ frontend/
       TopicStoryChains.tsx   # Custom SVG temporal "story chains" flow diagram
       QuarantinePage.tsx     # Settings menu → Quarantine: blind-spot map + reason/channel/time breakdowns + ledger
       WatchTimePage.tsx      # Settings menu → Watch Time: today-vs-yesterday and by-source hourly charts
-      SettingsMenu.tsx       # Gear-icon dropdown (Content, Quarantine, Watch Time)
+      EngagementPage.tsx     # Settings menu → Engagement: outcome mix, watch depth, channel leaderboards, decline trend
+      SettingsMenu.tsx       # Gear-icon dropdown (Content, Quarantine, Watch Time, Engagement)
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
     theme/               # Light/dark theme
@@ -307,6 +310,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/topic-flow/cluster/{cluster_id}/items/` | Content items belonging to a cluster (per `run_id`) |
 | GET | `/api/content/quarantine-stats/` | Quarantine analytics: verdicts, reason/channel breakdowns, weekly timeline, per-item ledger (backs the settings menu's Quarantine page) |
 | GET | `/api/consumption_stats/hourly/` | Minutes watched per hour, today + yesterday, in the given `tz` (IANA name, default UTC); safe to poll periodically |
+| GET | `/api/engagement/report/` | Per-channel engagement analytics: outcome states, cohort summaries, channel leaderboards with significance vs. baseline, the "voted up, not watched here" decline trend, and prediction calibration (backs the settings menu's Engagement page) |
 
 ## Automation API
 
@@ -372,7 +376,7 @@ Response:
 
 Accepted URL formats: `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/embed/`, `youtube.com/shorts/`
 
-Processing per video takes 1-3 minutes (caption fetch + AI summarization). Once complete, the video appears in the watchlist and content search. Ad-hoc videos are stored with `subscription_id: "adhoc"`.
+Processing per video takes 1-3 minutes (caption fetch + AI summarization). Once complete, the video appears in the watchlist and content search. Ad-hoc videos are stored with `subscription_id: "adhoc"` and `submission_source: "submit_video"` — this is the aitube-sync automation path. The Add Content page's confirm flow tags items `"manual_ui"`, and its no-preview `/ingest/` endpoint tags them `"api_ingest"`; ad-hoc items indexed before this field existed have no `submission_source` at all. The Engagement settings page uses this to separate "channels aitube-sync recommends" from "content I added myself" — see `backend/app/services/engagement_analysis.py`.
 
 ### Consumption report
 

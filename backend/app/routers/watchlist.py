@@ -156,6 +156,7 @@ async def _process_adhoc_videos(urls: list[str]) -> None:
             continue
         try:
             doc = build_adhoc_youtube_doc(vid, url)
+            doc["submission_source"] = "submit_video"
             enriched = await process_youtube_video_doc(doc)
             if enriched is None:
                 logger.info("Skipped ad-hoc video (livestream?): %s", url)

@@ -452,3 +452,130 @@ export function ingestContent(
     body: JSON.stringify({ url, title: title || null }),
   });
 }
+
+// --- Engagement analytics ---
+
+export type CohortKey = "subscription" | "adhoc_aitube_sync" | "adhoc_manual" | "adhoc_unclassified";
+
+export interface MetricPair {
+  k: number;
+  n: number;
+  raw: number;
+  shrunk: number;
+  wilson_low: number;
+  wilson_high: number;
+  risk_diff: number;
+  lift: number;
+  p_fisher: number;
+  bh_pass: boolean;
+  badge: "above" | "below" | "typical" | "too_few";
+  percentile: number;
+}
+
+export interface EngagementChannel {
+  channel_id: string;
+  label: string;
+  kind: "subscription" | "adhoc";
+  dominant_cohort: CohortKey;
+  cohort_breakdown: Record<string, number>;
+  is_mixed_cohort: boolean;
+  also_subscribed: boolean;
+  qualifies: boolean;
+  n_total: number;
+  n_eligible: number;
+  n_quarantined: number;
+  state_counts: Record<string, number>;
+  bucket_counts: Record<string, number>;
+  positive: MetricPair;
+  negative: MetricPair;
+  mean_ev: number;
+  watched_minutes: number;
+  runtime_share: number | null;
+  median_wp: number | null;
+  watch_depth_percentile: number | null;
+  cliffs_delta: number | null;
+  mannwhitney_p: number | null;
+  n_dur_unknown: number;
+  surprise: number | null;
+}
+
+export interface WpQuartiles {
+  q1: number;
+  median: number;
+  q3: number;
+  low_fence: number;
+  high_fence: number;
+}
+
+export interface EngagementCohortSummary {
+  key: CohortKey;
+  label: string;
+  n_total: number;
+  n_eligible: number;
+  n_pending: number;
+  n_quarantined: number;
+  state_counts: Record<string, number>;
+  bucket_counts: Record<string, number>;
+  positive_rate: number;
+  negative_rate: number;
+  explicit_neg_rate: number;
+  upvote_rate: number;
+  mean_ev: number;
+  watched_minutes: number;
+  median_wp: number | null;
+  wp_quartiles: WpQuartiles | null;
+}
+
+export interface DeclineMonth {
+  month: string;
+  n_upvoted: number;
+  n_consumed: number;
+  count_mwe: number;
+  rate_of_upvotes: number;
+  rate_of_upvotes_low: number;
+  rate_of_upvotes_high: number;
+  rate_of_consumed: number;
+  bookmarked_rate: number;
+  dismissed_rate: number;
+  confident: boolean;
+}
+
+export interface DeclineTrend {
+  ca_z: number | null;
+  ca_p: number | null;
+  spearman_rho: number | null;
+  spearman_p: number | null;
+  label: "declining" | "rising" | "no_clear_trend";
+}
+
+export interface DeclineSeries {
+  settle_days: number;
+  months: DeclineMonth[];
+  trend: DeclineTrend;
+}
+
+export interface CalibrationDecile {
+  decile: number;
+  mean_predicted: number;
+  observed_positive_rate: number;
+  n: number;
+}
+
+export interface EngagementReport {
+  generated_at: string;
+  settle_days: number;
+  video_total: number;
+  podcast_total: number;
+  article_total: number;
+  quarantine_sources_seen: string[];
+  corpus_median_wp: number | null;
+  cohorts: EngagementCohortSummary[];
+  channels: EngagementChannel[];
+  decline_strict: DeclineSeries;
+  decline_broad: DeclineSeries;
+  calibration: { deciles: CalibrationDecile[] };
+}
+
+export function getEngagementReport(): Promise<EngagementReport> {
+  return apiFetch("/engagement/report/");
+}
