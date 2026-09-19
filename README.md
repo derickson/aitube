@@ -205,6 +205,7 @@ Tunables (in `.env`, all optional):
 - **Ad skip** for podcasts — Claude detects sponsor reads and sets playback past them
 - **Smart URL resolution** for YouTube channels, Apple Podcasts, Spotify, and RSS discovery
 - **Light/dark theme** toggle
+- **Settings menu** (gear icon, top right, next to the theme toggle) — houses **Content** (subscription management, formerly its own nav tab) and **Quarantine** (analytics on items the external transcript judge rejected: a blind-spot map plotting each item's interest-model and engagement-classifier percentiles against the non-quarantined population — to see whether our own models were fooled — plus reason and channel breakdowns, a weekly timeline, and a drill-down ledger)
 - **Ad-hoc content** — add any YouTube video, podcast MP3, or web article directly via the Add Content page with metadata preview before processing
 - **Subscription management** with per-feed interest notes, type-colored cards, search, and filters
 - **Topic Flow** — unsupervised clustering of the recent corpus (Jina v5 clustering-task embeddings, density-probed centroid seeds, Hermes-written ≤5-word topic titles). Tab shows a UMAP cluster map and a "topic story chains" flow diagram (per-cluster ribbons over time, shared colors) above selectable topic cards
@@ -251,11 +252,13 @@ frontend/
       ContentView.tsx        # Flyout player/reader with transcript
       ContentTabs.tsx        # Tab switcher for content view panels
       ChatPanel.tsx          # Streaming chat for content Q&A
-      SubscriptionManager.tsx # Subscription CRUD with URL resolver
+      SubscriptionManager.tsx # Subscription CRUD with URL resolver (reached via settings menu → Content)
       AddContent.tsx         # Ad-hoc content submission with preview
       Search.tsx             # Full-text + semantic search
       TopicFlow.tsx          # Topic Flow tab (Plotly UMAP scatter + story chains + cards + flyout)
       TopicStoryChains.tsx   # Custom SVG temporal "story chains" flow diagram
+      QuarantinePage.tsx     # Settings menu → Quarantine: blind-spot map + reason/channel/time breakdowns + ledger
+      SettingsMenu.tsx       # Gear-icon dropdown (Content, Quarantine)
       ErrorBanner.tsx        # Error display with clipboard copy
     api/client.ts        # Typed backend API client
     theme/               # Light/dark theme
@@ -298,6 +301,7 @@ All API paths use trailing slashes. This is required for compatibility with reve
 | GET | `/api/topic-flow/latest/` | Latest Topic Flow run: clusters, labels, UMAP points |
 | GET | `/api/topic-flow/flow/` | Per-cluster daily content counts for the swimlane flow chart |
 | GET | `/api/topic-flow/cluster/{cluster_id}/items/` | Content items belonging to a cluster (per `run_id`) |
+| GET | `/api/content/quarantine-stats/` | Quarantine analytics: verdicts, reason/channel breakdowns, weekly timeline, per-item ledger (backs the settings menu's Quarantine page) |
 
 ## Automation API
 
