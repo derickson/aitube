@@ -756,23 +756,36 @@ def compute_decline_series(
 
 
 def compute_calibration(video_items: list[ItemFrame]) -> dict[str, Any]:
+    """Predicted-vs-actual confusion matrix for the ML engagement classifier.
+
+    Predicted positive uses the same score >= 0.5 threshold as
+    `/api/content/predictions/` (engagement.prediction isn't consulted here
+    since we only have the raw score on ItemFrame). Actual positive is
+    state in POSITIVE_STATES, the same definition the old reliability curve
+    used for "observed positive rate".
+    """
     scored = [i for i in video_items if i.engagement_score is not None and i.state != "PENDING" and not i.quarantined]
-    if len(scored) < 20:
-        return {"deciles": []}
-    scored.sort(key=lambda i: i.engagement_score)
     n = len(scored)
-    decile_size = max(1, n // 10)
-    deciles = []
-    for d in range(10):
-        start, end = d * decile_size, (d + 1) * decile_size if d < 9 else n
-        chunk = scored[start:end]
-        if not chunk:
-            continue
-        n_pos = sum(1 for i in chunk if i.state in POSITIVE_STATES)
-        deciles.append({
-            "decile": d + 1,
-            "mean_predicted": sum(i.engagement_score for i in chunk) / len(chunk),
-            "observed_positive_rate": n_pos / len(chunk),
-            "n": len(chunk),
-        })
-    return {"deciles": deciles}
+    if n < 20:
+        return {"matrix": None, "n": n, "accuracy": None, "precision": None, "recall": None}
+
+    tp = fp = fn = tn = 0
+    for i in scored:
+        predicted_positive = i.engagement_score >= 0.5
+        actual_positive = i.state in POSITIVE_STATES
+        if predicted_positive and actual_positive:
+            tp += 1
+        elif predicted_positive:
+            fp += 1
+        elif actual_positive:
+            fn += 1
+        else:
+            tn += 1
+
+    return {
+        "matrix": {"true_positive": tp, "false_positive": fp, "false_negative": fn, "true_negative": tn},
+        "n": n,
+        "accuracy": (tp + tn) / n,
+        "precision": tp / (tp + fp) if (tp + fp) else None,
+        "recall": tp / (tp + fn) if (tp + fn) else None,
+    }

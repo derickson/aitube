@@ -127,11 +127,19 @@ class DeclineOut(BaseModel):
     trend: TrendOut
 
 
-class CalibrationDecileOut(BaseModel):
-    decile: int
-    mean_predicted: float
-    observed_positive_rate: float
+class ConfusionMatrixOut(BaseModel):
+    true_positive: int
+    false_positive: int
+    false_negative: int
+    true_negative: int
+
+
+class CalibrationOut(BaseModel):
+    matrix: ConfusionMatrixOut | None
     n: int
+    accuracy: float | None = None
+    precision: float | None = None
+    recall: float | None = None
 
 
 class EngagementReportResponse(BaseModel):
@@ -146,7 +154,7 @@ class EngagementReportResponse(BaseModel):
     channels: list[ChannelOut]
     decline_strict: DeclineOut
     decline_broad: DeclineOut
-    calibration: dict[str, Any]
+    calibration: CalibrationOut
 
 
 @router.get("/report/", response_model=EngagementReportResponse)

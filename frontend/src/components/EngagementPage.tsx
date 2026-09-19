@@ -399,58 +399,58 @@ function DeclineChart({ report, variant }: { report: EngagementReport; variant: 
   return <div ref={ref} />;
 }
 
-function CalibrationChart({ report }: { report: EngagementReport }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!ref.current || report.calibration.deciles.length === 0) return;
-    let disposed = false;
-    const el = ref.current;
-
-    (async () => {
-      const Plotly = (await import("plotly.js-dist-min")).default;
-      if (disposed) return;
-      const dark = isDarkMode();
-      const paper = dark ? "#0f0f0f" : "#ffffff";
-      const font = dark ? "#e5e5e5" : "#1a1a1a";
-      const grid = dark ? "#333" : "#e5e5e5";
-      const accent = dark ? "#3987e5" : "#2a78d6";
-
-      const d = report.calibration.deciles;
-      const trace: any = {
-        x: d.map((x) => x.mean_predicted * 100), y: d.map((x) => x.observed_positive_rate * 100),
-        mode: "markers+lines", type: "scatter",
-        marker: { size: d.map((x) => Math.max(8, Math.sqrt(x.n) * 2)), color: accent },
-        line: { color: accent, width: 1 },
-        text: d.map((x) => `n=${x.n}`),
-        hovertemplate: "predicted %{x:.0f}% → observed %{y:.0f}%<br>%{text}<extra></extra>",
-      };
-      const diag: any = {
-        x: [0, 100], y: [0, 100], mode: "lines", type: "scatter",
-        line: { color: grid, dash: "dot", width: 1 }, showlegend: false, hoverinfo: "skip",
-      };
-      const layout: any = {
-        height: 320,
-        margin: { l: 55, r: 10, t: 10, b: 45 },
-        showlegend: false,
-        xaxis: { title: { text: "predicted engagement.score (decile mean)", font: { color: font, size: 11 } }, range: [0, 100], ticksuffix: "%", gridcolor: grid, color: font },
-        yaxis: { title: { text: "observed positive rate", font: { color: font, size: 11 } }, range: [0, 100], ticksuffix: "%", gridcolor: grid, color: font },
-        paper_bgcolor: paper,
-        plot_bgcolor: paper,
-      };
-      await Plotly.react(el, [diag, trace], layout, { displaylogo: false, responsive: true });
-    })().catch((e) => console.error("calibration plot failed", e));
-
-    return () => {
-      disposed = true;
-      import("plotly.js-dist-min").then((m) => { try { (m.default as any).purge(el); } catch { /* noop */ } });
-    };
-  }, [report]);
-
-  if (report.calibration.deciles.length === 0) {
-    return <p className="engagement-chart-caption">Not enough scored items yet to build a reliability curve.</p>;
+function PredictionConfusionMatrix({ report }: { report: EngagementReport }) {
+  const cal = report.calibration;
+  if (!cal.matrix) {
+    return <p className="engagement-chart-caption">Not enough scored items yet to build a confusion matrix.</p>;
   }
-  return <div ref={ref} />;
+  const { true_positive: tp, false_positive: fp, false_negative: fn, true_negative: tn } = cal.matrix;
+  const total = tp + fp + fn + tn;
+  const pct = (n: number) => (total ? `${((n / total) * 100).toFixed(0)}%` : "0%");
+  // Correct cells (tp/tn) shade green by their share of the matrix; incorrect
+  // cells (fp/fn) shade red the same way, so the eye reads "how much of this
+  // page is green" as accuracy at a glance.
+  const shade = (n: number, correct: boolean) => {
+    const alpha = total ? Math.min(0.85, 0.12 + (n / total) * 0.9) : 0.12;
+    return correct ? `rgba(22, 163, 74, ${alpha})` : `rgba(220, 38, 38, ${alpha})`;
+  };
+
+  const cells: Array<{ key: string; label: string; n: number; correct: boolean }> = [
+    { key: "tp", label: "True positive", n: tp, correct: true },
+    { key: "fp", label: "False positive", n: fp, correct: false },
+    { key: "fn", label: "False negative", n: fn, correct: false },
+    { key: "tn", label: "True negative", n: tn, correct: true },
+  ];
+
+  return (
+    <div>
+      <div className="engagement-confusion-grid">
+        <div />
+        <div className="engagement-confusion-axis-label">Actual: engaged</div>
+        <div className="engagement-confusion-axis-label">Actual: not engaged</div>
+        <div className="engagement-confusion-axis-label engagement-confusion-axis-label-row">Predicted: engaged</div>
+        {cells.slice(0, 2).map((c) => (
+          <div key={c.key} className="engagement-confusion-cell" style={{ background: shade(c.n, c.correct) }}>
+            <span className="engagement-confusion-count">{c.n}</span>
+            <span className="engagement-confusion-label">{c.label} · {pct(c.n)}</span>
+          </div>
+        ))}
+        <div className="engagement-confusion-axis-label engagement-confusion-axis-label-row">Predicted: not engaged</div>
+        {cells.slice(2, 4).map((c) => (
+          <div key={c.key} className="engagement-confusion-cell" style={{ background: shade(c.n, c.correct) }}>
+            <span className="engagement-confusion-count">{c.n}</span>
+            <span className="engagement-confusion-label">{c.label} · {pct(c.n)}</span>
+          </div>
+        ))}
+      </div>
+      <p className="engagement-chart-caption">
+        n = {cal.n} scored, non-pending, non-quarantined videos.
+        {cal.accuracy != null && ` Accuracy ${(cal.accuracy * 100).toFixed(0)}%`}
+        {cal.precision != null && ` · Precision ${(cal.precision * 100).toFixed(0)}%`}
+        {cal.recall != null && ` · Recall ${(cal.recall * 100).toFixed(0)}%`}
+      </p>
+    </div>
+  );
 }
 
 // --- leaderboard ---
@@ -728,8 +728,10 @@ export function EngagementPage() {
 
       <details className="engagement-details">
         <summary>Prediction calibration</summary>
-        <p className="engagement-chart-caption">Does the ML engagement classifier's predicted score match what actually happens? Scored items only.</p>
-        <CalibrationChart report={report} />
+        <p className="engagement-chart-caption">
+          Does the ML engagement classifier's predicted score (≥50% = predicted engaged) match what actually happens? Scored items only.
+        </p>
+        <PredictionConfusionMatrix report={report} />
       </details>
 
       <details id="engagement-notes" className="engagement-details">

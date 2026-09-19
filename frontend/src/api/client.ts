@@ -572,11 +572,19 @@ export interface DeclineSeries {
   trend: DeclineTrend;
 }
 
-export interface CalibrationDecile {
-  decile: number;
-  mean_predicted: number;
-  observed_positive_rate: number;
+export interface ConfusionMatrix {
+  true_positive: number;
+  false_positive: number;
+  false_negative: number;
+  true_negative: number;
+}
+
+export interface Calibration {
+  matrix: ConfusionMatrix | null;
   n: number;
+  accuracy: number | null;
+  precision: number | null;
+  recall: number | null;
 }
 
 export interface EngagementReport {
@@ -591,7 +599,7 @@ export interface EngagementReport {
   channels: EngagementChannel[];
   decline_strict: DeclineSeries;
   decline_broad: DeclineSeries;
-  calibration: { deciles: CalibrationDecile[] };
+  calibration: Calibration;
 }
 
 export function getEngagementReport(): Promise<EngagementReport> {
