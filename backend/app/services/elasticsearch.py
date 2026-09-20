@@ -11,6 +11,7 @@ WATCH_TIME_INDEX = "aitube-watch-time"
 CLUSTER_RUNS_INDEX = "aitube-cluster-runs"
 QUARANTINE_EVENTS_INDEX = "aitube-quarantine-events"
 SUMMARY_EVAL_INDEX = settings.summary_eval_index
+CATEGORY_CONFIG_INDEX = "aitube-category-config"
 
 
 # Ingest pipeline that runs the custom engagement classifier (loaded from the
@@ -234,6 +235,14 @@ INDEX_MAPPINGS: dict[str, dict] = {
                         "rss": {"type": "float"},
                     },
                 },
+            }
+        }
+    },
+    CATEGORY_CONFIG_INDEX: {
+        "mappings": {
+            "properties": {
+                "categories": {"type": "object", "enabled": False},
+                "updated_at": {"type": "date"},
             }
         }
     },

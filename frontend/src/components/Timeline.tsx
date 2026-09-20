@@ -6,6 +6,7 @@ import {
   batchPlaybackProgress,
   setInterest as apiSetInterest,
   setConsumed as apiSetConsumed,
+  getCategorySettings,
   CATEGORY_LABELS,
   type ContentType,
   type ContentSearchResponse,
@@ -45,6 +46,17 @@ export function Timeline() {
   const [pendingHidden, setPendingHidden] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  // The taxonomy is user-editable (Category Settings page), so the facet options
+  // must come from there rather than the static bootstrap CATEGORY_LABELS —
+  // otherwise a renamed/added/removed category never shows up here even after
+  // items have been relabeled.
+  const [categoryLabels, setCategoryLabels] = useState<string[]>([...CATEGORY_LABELS]);
+  useEffect(() => {
+    getCategorySettings()
+      .then((r) => setCategoryLabels(r.categories.map((c) => c.label)))
+      .catch(() => {});
+  }, []);
 
   const consumedFilterRef = useRef<"true" | "false" | "">("false");
   const interestFilterRef = useRef<"up" | "down" | "none" | "">("");
@@ -329,13 +341,12 @@ export function Timeline() {
 
           <div className="facet-group">
             <h4 className="facet-heading">Category</h4>
-            <p className="facet-hint">Click once to require (+), again to mute (−)</p>
             {Object.keys(categoryState).length > 0 && (
               <button className="facet-item" onClick={() => setCategoryState({})}>
                 <span>Clear</span>
               </button>
             )}
-            {CATEGORY_LABELS.map((label) => {
+            {categoryLabels.map((label) => {
               const state = categoryState[label];
               return (
                 <button

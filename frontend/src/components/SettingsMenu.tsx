@@ -64,6 +64,9 @@ export function SettingsMenu() {
           <NavLink to="/engagement/" role="menuitem" onClick={close}>
             Engagement
           </NavLink>
+          <NavLink to="/category-settings/" role="menuitem" onClick={close}>
+            Category Settings
+          </NavLink>
         </div>
       )}
     </div>

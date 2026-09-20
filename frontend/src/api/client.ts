@@ -662,3 +662,47 @@ export interface EngagementReport {
 export function getEngagementReport(): Promise<EngagementReport> {
   return apiFetch("/engagement/report/");
 }
+
+// --- Category settings ---
+
+export interface CategoryConfig {
+  slug: string;
+  label: string;
+  description: string;
+}
+
+export interface CategorySettingsResponse {
+  categories: CategoryConfig[];
+}
+
+export function getCategorySettings(): Promise<CategorySettingsResponse> {
+  return apiFetch("/category/settings/");
+}
+
+export function updateCategorySettings(categories: CategoryConfig[]): Promise<CategorySettingsResponse> {
+  return apiFetch("/category/settings/", {
+    method: "PUT",
+    body: JSON.stringify({ categories }),
+  });
+}
+
+export type RecategorizeStatusValue = "idle" | "running" | "done" | "error";
+
+export interface RecategorizeStatus {
+  status: RecategorizeStatusValue;
+  started_at: string | null;
+  finished_at: string | null;
+  total: number | null;
+  scanned: number;
+  categorized: number;
+  failed: number;
+  error: string | null;
+}
+
+export function recategorizeAllVideos(): Promise<{ status: string }> {
+  return apiFetch("/category/recategorize/", { method: "POST" });
+}
+
+export function getRecategorizeStatus(): Promise<RecategorizeStatus> {
+  return apiFetch("/category/recategorize/status/");
+}
