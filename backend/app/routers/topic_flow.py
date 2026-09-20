@@ -14,8 +14,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.app.models.content import ContentItemSummary
+from backend.app.services.clustering import load_latest_run, load_run_by_id
 from backend.app.services.elasticsearch import (
-    CLUSTER_RUNS_INDEX,
     CONTENT_ITEMS_INDEX,
     get_es_client,
 )
@@ -65,34 +65,6 @@ class TopicFlowOverTime(BaseModel):
     series: list[TopicFlowDailySeries]
 
 
-async def _load_latest_run() -> dict[str, Any] | None:
-    es = get_es_client()
-    try:
-        resp = await es.search(
-            index=CLUSTER_RUNS_INDEX,
-            body={
-                "size": 1,
-                "sort": [{"created_at": {"order": "desc"}}],
-                "query": {"match_all": {}},
-            },
-        )
-    except Exception:
-        return None
-    hits = resp["hits"]["hits"]
-    if not hits:
-        return None
-    return hits[0]["_source"]
-
-
-async def _load_run_by_id(run_id: str) -> dict[str, Any] | None:
-    es = get_es_client()
-    try:
-        resp = await es.get(index=CLUSTER_RUNS_INDEX, id=run_id)
-    except Exception:
-        return None
-    return resp.get("_source")
-
-
 async def _load_points(run_id: str) -> list[TopicFlowPoint]:
     es = get_es_client()
     points: list[TopicFlowPoint] = []
@@ -135,7 +107,7 @@ async def _load_points(run_id: str) -> list[TopicFlowPoint]:
 
 @router.get("/latest/", response_model=TopicFlowResponse)
 async def latest():
-    run = await _load_latest_run()
+    run = await load_latest_run()
     if not run:
         raise HTTPException(status_code=404, detail="No clustering run found. Run rebuild_clusters first.")
     points = await _load_points(run["run_id"])
@@ -200,9 +172,9 @@ async def flow(run_id: str | None = None):
     order (size desc) so colors line up with the scatter plot on the client.
     """
     if run_id:
-        run = await _load_run_by_id(run_id) or await _load_latest_run()
+        run = await load_run_by_id(run_id) or await load_latest_run()
     else:
-        run = await _load_latest_run()
+        run = await load_latest_run()
     if not run:
         raise HTTPException(status_code=404, detail="No clustering run found.")
     run_id = run["run_id"]

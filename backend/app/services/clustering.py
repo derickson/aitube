@@ -229,14 +229,14 @@ def _dissolve_small(assignments: np.ndarray, min_size: int) -> np.ndarray:
     return out
 
 
-def _compute_umap_sync(matrix: np.ndarray) -> np.ndarray:
-    """2D UMAP projection. Blocking — call via asyncio.to_thread."""
+def _compute_umap_sync(matrix: np.ndarray, n_components: int = 2) -> np.ndarray:
+    """UMAP projection to `n_components` dims. Blocking — call via asyncio.to_thread."""
     if matrix.shape[0] < 4:
-        return np.zeros((matrix.shape[0], 2), dtype=np.float32)
+        return np.zeros((matrix.shape[0], n_components), dtype=np.float32)
     import umap  # imported lazily so the server module loads even if not installed
 
     reducer = umap.UMAP(
-        n_components=2,
+        n_components=n_components,
         n_neighbors=min(settings.umap_neighbors, matrix.shape[0] - 1),
         min_dist=settings.umap_min_dist,
         metric="cosine",
@@ -437,6 +437,7 @@ async def _bulk_write_assignments(
     docs: list[dict[str, Any]],
     cluster_of: dict[str, str | None],
     coords: np.ndarray,
+    coords3d: np.ndarray,
     run_id: str,
 ) -> None:
     es = get_es_client()
@@ -450,6 +451,9 @@ async def _bulk_write_assignments(
             "cluster_run_id": run_id,
             "umap_x": float(coords[i, 0]),
             "umap_y": float(coords[i, 1]),
+            "embedding3d_x": float(coords3d[i, 0]),
+            "embedding3d_y": float(coords3d[i, 1]),
+            "embedding3d_z": float(coords3d[i, 2]),
         }})
     chunk = 200
     for i in range(0, len(ops), chunk * 2):
@@ -538,6 +542,7 @@ async def rebuild_clusters() -> dict[str, Any]:
             cluster_member_ids.setdefault(cid, []).append(d["id"])
 
     coords = await asyncio.to_thread(_compute_umap_sync, matrix)
+    coords3d = await asyncio.to_thread(_compute_umap_sync, matrix, n_components=3)
     cluster_info = await _label_clusters(docs, cluster_member_ids)
 
     # Drop clusters whose label is empty (no distinguishing vocabulary)
@@ -561,7 +566,7 @@ async def rebuild_clusters() -> dict[str, Any]:
             cluster_info[cid]["label"] = name
 
     noise_count = sum(1 for cid in cluster_of.values() if cid is None)
-    await _bulk_write_assignments(docs, cluster_of, coords, run_id)
+    await _bulk_write_assignments(docs, cluster_of, coords, coords3d, run_id)
     await _persist_run(
         run_id=run_id,
         cluster_info=cluster_info,
@@ -580,3 +585,32 @@ async def rebuild_clusters() -> dict[str, Any]:
     }
     logger.info("rebuild_clusters done: %s", summary)
     return summary
+
+
+async def load_latest_run() -> dict[str, Any] | None:
+    """Latest `aitube-cluster-runs` doc. Shared by the topic-flow and embeddings routers."""
+    es = get_es_client()
+    try:
+        resp = await es.search(
+            index=CLUSTER_RUNS_INDEX,
+            body={
+                "size": 1,
+                "sort": [{"created_at": {"order": "desc"}}],
+                "query": {"match_all": {}},
+            },
+        )
+    except Exception:
+        return None
+    hits = resp["hits"]["hits"]
+    if not hits:
+        return None
+    return hits[0]["_source"]
+
+
+async def load_run_by_id(run_id: str) -> dict[str, Any] | None:
+    es = get_es_client()
+    try:
+        resp = await es.get(index=CLUSTER_RUNS_INDEX, id=run_id)
+    except Exception:
+        return None
+    return resp.get("_source")

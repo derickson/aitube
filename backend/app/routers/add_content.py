@@ -469,6 +469,7 @@ async def _process_podcast(url: str, title_override: str | None, submission_sour
         "type": "podcast_episode",
         "title": title,
         "url": url,
+        "channel_name": meta.get("podcast_name") or author or None,
         "published_at": datetime.now(timezone.utc).isoformat(),
         "discovered_at": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": duration,

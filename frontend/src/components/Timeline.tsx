@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   searchContent,
   listSubscriptions,
@@ -20,14 +21,23 @@ function facetCount(buckets: FacetBucket[] | undefined, key: string): number {
   return buckets?.find((b) => b.key === key)?.count ?? 0;
 }
 
+// consumedFilter's default ("false" — unwatched) differs from the URL's
+// "absent means unset" convention, so it gets its own explicit "all" token.
+function readConsumedParam(v: string | null): "true" | "false" | "" {
+  if (v === "all") return "";
+  if (v === "true" || v === "false") return v;
+  return "false";
+}
+
 export function Timeline() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<ContentSearchResponse | null>(null);
   const [subs, setSubs] = useState<Record<string, Subscription>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // Selected content for inline player
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get("item"));
   const [consumedIds, setConsumedIds] = useState<Set<string>>(new Set());
   // Items the user has just acted on whose change isn't yet visible in ES
   // search results. Hidden client-side until the next intentional refetch
@@ -66,14 +76,30 @@ export function Timeline() {
   // Playback progress (lazy loaded)
   const [progress, setProgress] = useState<Record<string, PlaybackProgress>>({});
 
-  // Server-side filters
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<ContentType | "">("");
-  const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">("");
-  const [subFilter, setSubFilter] = useState("");
-  const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">("false");
+  // Server-side filters — initial values are read once from the URL so a
+  // refresh or a pasted link restores the exact same view.
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [typeFilter, setTypeFilter] = useState<ContentType | "">(
+    () => (searchParams.get("type") as ContentType | null) ?? "",
+  );
+  const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">(
+    () => (searchParams.get("interest") as "up" | "down" | "none" | null) ?? "",
+  );
+  const [subFilter, setSubFilter] = useState(() => searchParams.get("sub") ?? "");
+  const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">(
+    () => readConsumedParam(searchParams.get("consumed")),
+  );
   // Tri-state per category: "include" (+), "exclude" (-, muted), or absent (neutral).
-  const [categoryState, setCategoryState] = useState<Record<string, "include" | "exclude">>({});
+  const [categoryState, setCategoryState] = useState<Record<string, "include" | "exclude">>(() => {
+    const initial: Record<string, "include" | "exclude"> = {};
+    for (const label of (searchParams.get("cat_in") ?? "").split(",")) {
+      if (label) initial[label] = "include";
+    }
+    for (const label of (searchParams.get("cat_out") ?? "").split(",")) {
+      if (label) initial[label] = "exclude";
+    }
+    return initial;
+  });
   // Client-side filter for the Source facet list
   const [subSearch, setSubSearch] = useState("");
   consumedFilterRef.current = consumedFilter;
@@ -97,7 +123,7 @@ export function Timeline() {
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
 
   const fetchData = useCallback(async () => {
     try {
@@ -141,6 +167,23 @@ export function Timeline() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Keep the address bar in sync with every filter/toggle and the open flyout,
+  // so a refresh or a pasted link restores this exact view.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (debouncedSearch) params.set("q", debouncedSearch);
+    if (typeFilter) params.set("type", typeFilter);
+    if (interestFilter) params.set("interest", interestFilter);
+    if (subFilter) params.set("sub", subFilter);
+    if (consumedFilter === "") params.set("consumed", "all");
+    else if (consumedFilter !== "false") params.set("consumed", consumedFilter);
+    if (categoryIncludeCsv) params.set("cat_in", categoryIncludeCsv);
+    if (categoryExcludeCsv) params.set("cat_out", categoryExcludeCsv);
+    if (selectedId) params.set("item", selectedId);
+    setSearchParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, typeFilter, interestFilter, subFilter, consumedFilter, categoryIncludeCsv, categoryExcludeCsv, selectedId]);
 
   useEffect(() => {
     if (selectedId && window.innerWidth <= 768) {

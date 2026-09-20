@@ -104,6 +104,7 @@ def _parse_dlp_item(
         "type": content_type,
         "title": clean_feed_text(raw.get("title")) or "Untitled",
         "url": raw.get("url", ""),
+        "channel_name": subscription.name,
         "published_at": published_at,
         "discovered_at": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": raw.get("duration_seconds"),
@@ -131,6 +132,7 @@ def build_adhoc_youtube_doc(video_id: str, url: str) -> dict[str, Any]:
         "type": "video",
         "title": "",
         "url": url,
+        "channel_name": None,
         "published_at": None,
         "discovered_at": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": None,
@@ -172,6 +174,8 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
                 doc["title"] = meta["title"]
             if not doc.get("metadata", {}).get("author") and meta.get("uploader"):
                 doc.setdefault("metadata", {})["author"] = meta["uploader"]
+            if not doc.get("channel_name") and meta.get("uploader"):
+                doc["channel_name"] = meta["uploader"]
             if not doc.get("metadata", {}).get("description") and meta.get("description"):
                 doc.setdefault("metadata", {})["description"] = meta["description"]
             if not doc.get("published_at") and meta.get("upload_date"):

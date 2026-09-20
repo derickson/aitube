@@ -378,6 +378,51 @@ export function getTopicFlowClusterItems(
   return apiFetch(`/topic-flow/cluster/${encodeURIComponent(clusterId)}/items/?${qs}`);
 }
 
+// --- Embeddings ---
+
+export interface EmbeddingSource {
+  key: string;
+  label: string;
+}
+
+export interface EmbeddingCluster {
+  id: string;
+  label: string;
+  size: number;
+}
+
+export interface EmbeddingPoint {
+  item_id: string;
+  coords: Record<string, [number, number, number]>;
+  title: string;
+  type: string;
+  thumbnail_url: string | null;
+  published_at: string | null;
+  subscription_id: string;
+  channel_name: string | null;
+  category: string | null;
+  cluster_id: string | null;
+  cluster_label: string | null;
+  user_interest: string | null;
+  consumed: boolean;
+  viewed: boolean;
+  prediction: string | null;
+  prediction_score: number | null;
+}
+
+export interface EmbeddingsResponse {
+  run_id: string;
+  created_at: string;
+  doc_count: number;
+  embeddings: EmbeddingSource[];
+  clusters: EmbeddingCluster[];
+  points: EmbeddingPoint[];
+}
+
+export function getEmbeddingsLatest(): Promise<EmbeddingsResponse> {
+  return apiFetch("/embeddings/latest/");
+}
+
 // --- Quarantine ---
 
 export interface QuarantineEventDetail {

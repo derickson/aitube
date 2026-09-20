@@ -48,6 +48,9 @@ _CLUSTERING_FIELDS = {
     "cluster_run_id": {"type": "keyword"},
     "umap_x": {"type": "float"},
     "umap_y": {"type": "float"},
+    "embedding3d_x": {"type": "float"},
+    "embedding3d_y": {"type": "float"},
+    "embedding3d_z": {"type": "float"},
 }
 
 _client: AsyncElasticsearch | None = None
@@ -94,6 +97,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "type": {"type": "keyword"},
                 "title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
                 "url": {"type": "keyword"},
+                "channel_name": {"type": "keyword"},
                 "published_at": {"type": "date"},
                 "discovered_at": {"type": "date"},
                 "duration_seconds": {"type": "float"},
@@ -136,6 +140,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                     "copy_to": "semantic_headline",
                 },
                 "url": {"type": "keyword"},
+                "channel_name": {"type": "keyword"},
                 "published_at": {"type": "date"},
                 "discovered_at": {"type": "date"},
                 "duration_seconds": {"type": "float"},
