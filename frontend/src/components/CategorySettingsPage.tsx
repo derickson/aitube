@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   getCategorySettings,
   updateCategorySettings,
   recategorizeAllVideos,
   getRecategorizeStatus,
   type CategoryConfig,
+  type SubcategoryConfig,
   type RecategorizeStatus,
 } from "../api/client";
 import { ErrorBanner } from "./ErrorBanner";
@@ -21,11 +22,27 @@ function slugify(label: string): string {
 }
 
 function emptyCategory(): CategoryConfig {
+  return { slug: "", label: "", description: "", subcategories: [] };
+}
+
+function emptySubcategory(): SubcategoryConfig {
   return { slug: "", label: "", description: "" };
+}
+
+function trimEntry<T extends SubcategoryConfig>(c: T): SubcategoryConfig {
+  return { slug: c.slug.trim(), label: c.label.trim(), description: c.description.trim() };
+}
+
+// Keep slug in sync with label until the user edits slug directly.
+function withLabel<T extends SubcategoryConfig>(row: T, label: string): T {
+  const autoSlug = !row.slug || row.slug === slugify(row.label);
+  return { ...row, label, slug: autoSlug ? slugify(label) : row.slug };
 }
 
 export function CategorySettingsPage() {
   const [categories, setCategories] = useState<CategoryConfig[] | null>(null);
+  // Indices of categories whose Topics (subcategories) editor is open.
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -94,15 +111,36 @@ export function CategorySettingsPage() {
   const handleLabelChange = (index: number, label: string) => {
     setCategories((prev) => {
       if (!prev) return prev;
-      const row = prev[index];
-      // Keep slug in sync with label until the user edits slug directly.
-      const autoSlug = !row.slug || row.slug === slugify(row.label);
       const next = [...prev];
-      next[index] = { ...row, label, slug: autoSlug ? slugify(label) : row.slug };
+      next[index] = withLabel(prev[index], label);
       return next;
     });
     setSaved(false);
   };
+
+  const updateSubcategories = (index: number, fn: (subs: SubcategoryConfig[]) => SubcategoryConfig[]) => {
+    setCategories((prev) => {
+      if (!prev) return prev;
+      const next = [...prev];
+      next[index] = { ...prev[index], subcategories: fn(prev[index].subcategories) };
+      return next;
+    });
+    setSaved(false);
+  };
+
+  const updateSubRow = (index: number, subIndex: number, patch: Partial<SubcategoryConfig>) =>
+    updateSubcategories(index, (subs) => subs.map((s, j) => (j === subIndex ? { ...s, ...patch } : s)));
+
+  const handleSubLabelChange = (index: number, subIndex: number, label: string) =>
+    updateSubcategories(index, (subs) => subs.map((s, j) => (j === subIndex ? withLabel(s, label) : s)));
+
+  const toggleExpanded = (index: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
 
   const addRow = () => {
     setCategories((prev) => [...(prev ?? []), emptyCategory()]);
@@ -111,6 +149,8 @@ export function CategorySettingsPage() {
 
   const removeRow = (index: number) => {
     setCategories((prev) => (prev ? prev.filter((_, i) => i !== index) : prev));
+    // Expanded state is by index, so shift it past the removed row.
+    setExpanded((prev) => new Set([...prev].filter((i) => i !== index).map((i) => (i > index ? i - 1 : i))));
     setSaved(false);
   };
 
@@ -118,10 +158,9 @@ export function CategorySettingsPage() {
     if (!categories) return;
     setSaveError("");
 
-    const trimmed = categories.map((c) => ({
-      slug: c.slug.trim(),
-      label: c.label.trim(),
-      description: c.description.trim(),
+    const trimmed: CategoryConfig[] = categories.map((c) => ({
+      ...trimEntry(c),
+      subcategories: c.subcategories.map(trimEntry),
     }));
     if (trimmed.some((c) => !c.slug || !c.label || !c.description)) {
       setSaveError("Every category needs a slug, label, and description.");
@@ -131,6 +170,17 @@ export function CategorySettingsPage() {
     if (new Set(slugs).size !== slugs.length) {
       setSaveError("Category slugs must be unique.");
       return;
+    }
+    for (const c of trimmed) {
+      if (c.subcategories.some((s) => !s.slug || !s.label || !s.description)) {
+        setSaveError(`Every topic under "${c.label}" needs a slug, label, and description.`);
+        return;
+      }
+      const subSlugs = c.subcategories.map((s) => s.slug);
+      if (new Set(subSlugs).size !== subSlugs.length) {
+        setSaveError(`Topic slugs under "${c.label}" must be unique.`);
+        return;
+      }
     }
 
     setSaving(true);
@@ -173,8 +223,10 @@ export function CategorySettingsPage() {
       <div className="category-settings-header">
         <h2>Category Settings</h2>
         <p className="category-settings-sub">
-          Categories used by Jev to classify content. Changes here apply to new content going
-          forward; use "Recategorize All Videos" below to relabel everything already indexed.
+          Categories used by Jev to classify content. A category can also have topics
+          (subcategories), which Jev picks in the same call — they drive the Topic facet and the
+          Embeddings view's Topic coloring. Changes here apply to new content going forward; use
+          "Recategorize All Videos" below to relabel everything already indexed.
         </p>
       </div>
 
@@ -190,7 +242,8 @@ export function CategorySettingsPage() {
           </thead>
           <tbody>
             {categories.map((c, i) => (
-              <tr key={i}>
+              <Fragment key={i}>
+              <tr>
                 <td>
                   <input
                     className="category-input"
@@ -216,7 +269,14 @@ export function CategorySettingsPage() {
                     onChange={(e) => updateRow(i, { description: e.target.value })}
                   />
                 </td>
-                <td>
+                <td className="category-row-actions">
+                  <button
+                    className="btn category-topics-btn"
+                    onClick={() => toggleExpanded(i)}
+                    aria-expanded={expanded.has(i)}
+                  >
+                    Topics ({c.subcategories.length}) {expanded.has(i) ? "▾" : "▸"}
+                  </button>
                   <button
                     className="btn btn-danger category-remove-btn"
                     onClick={() => removeRow(i)}
@@ -227,6 +287,55 @@ export function CategorySettingsPage() {
                   </button>
                 </td>
               </tr>
+              {expanded.has(i) && (
+                <tr className="subcategory-row">
+                  <td colSpan={4}>
+                    <div className="subcategory-editor">
+                      {c.subcategories.length === 0 && (
+                        <p className="category-settings-sub">
+                          No topics — items in "{c.label || "this category"}" get no subcategory.
+                        </p>
+                      )}
+                      {c.subcategories.map((sub, j) => (
+                        <div className="subcategory-item" key={j}>
+                          <input
+                            className="category-input"
+                            value={sub.label}
+                            placeholder="Topic label"
+                            onChange={(e) => handleSubLabelChange(i, j, e.target.value)}
+                          />
+                          <input
+                            className="category-input category-input-slug"
+                            value={sub.slug}
+                            placeholder="slug"
+                            onChange={(e) => updateSubRow(i, j, { slug: slugify(e.target.value) })}
+                          />
+                          <textarea
+                            className="category-input category-input-description"
+                            value={sub.description}
+                            placeholder="What this topic means, for the model"
+                            rows={2}
+                            onChange={(e) => updateSubRow(i, j, { description: e.target.value })}
+                          />
+                          <button
+                            className="btn btn-danger category-remove-btn"
+                            onClick={() => updateSubcategories(i, (subs) => subs.filter((_, k) => k !== j))}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        className="btn"
+                        onClick={() => updateSubcategories(i, (subs) => [...subs, emptySubcategory()])}
+                      >
+                        + Add topic
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -247,7 +356,7 @@ export function CategorySettingsPage() {
         <h3>Recategorize All Videos</h3>
         <p className="category-settings-sub">
           Reprocesses every content item with the current categories and writes back only the
-          category field via a bulk partial update — it does not touch or re-vectorize any other
+          category and topic fields via a bulk partial update — it does not touch or re-vectorize any other
           field.
         </p>
         <button className="btn btn-primary" onClick={handleRecategorize} disabled={running}>

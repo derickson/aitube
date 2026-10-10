@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from backend.app.models.content import ContentItemSummary
 from backend.app.services.clustering import load_latest_run, load_run_by_id
+from backend.app.services.demo_mode import DemoMode, count_by_cluster, demo_cluster_sizes, demo_filters
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     get_es_client,
@@ -65,7 +66,7 @@ class TopicFlowOverTime(BaseModel):
     series: list[TopicFlowDailySeries]
 
 
-async def _load_points(run_id: str) -> list[TopicFlowPoint]:
+async def _load_points(run_id: str, scope: list[dict[str, Any]]) -> list[TopicFlowPoint]:
     es = get_es_client()
     points: list[TopicFlowPoint] = []
     search_after: list[Any] | None = None
@@ -76,7 +77,7 @@ async def _load_points(run_id: str) -> list[TopicFlowPoint]:
                 "title", "type", "thumbnail_url", "published_at",
                 "cluster_id", "umap_x", "umap_y",
             ],
-            "query": {"term": {"cluster_run_id": run_id}},
+            "query": {"bool": {"filter": [{"term": {"cluster_run_id": run_id}}, *scope]}},
             "sort": [{"external_id": {"order": "asc", "missing": "_last"}}],
         }
         if search_after:
@@ -106,11 +107,11 @@ async def _load_points(run_id: str) -> list[TopicFlowPoint]:
 
 
 @router.get("/latest/", response_model=TopicFlowResponse)
-async def latest():
+async def latest(demo: DemoMode = False):
     run = await load_latest_run()
     if not run:
         raise HTTPException(status_code=404, detail="No clustering run found. Run rebuild_clusters first.")
-    points = await _load_points(run["run_id"])
+    points = await _load_points(run["run_id"], await demo_filters(demo))
     clusters = [
         TopicFlowCluster(
             id=c["id"],
@@ -121,11 +122,28 @@ async def latest():
         )
         for c in run.get("clusters", [])
     ]
+    doc_count = int(run.get("doc_count", 0))
+    noise_count = int(run.get("noise_count", 0))
+    if demo:
+        # Keep only clusters that are mostly in scope, re-sized to their in-scope
+        # points (the rest become noise), and drop out-of-scope representatives.
+        sizes = demo_cluster_sizes(run.get("clusters", []), count_by_cluster([p.cluster_id for p in points]))
+        points = [p if p.cluster_id in sizes else p.model_copy(update={"cluster_id": None}) for p in points]
+        point_ids = {p.item_id for p in points}
+        clusters = [
+            c.model_copy(update={
+                "size": sizes[c.id],
+                "representative_item_ids": [i for i in c.representative_item_ids if i in point_ids],
+            })
+            for c in clusters if c.id in sizes
+        ]
+        doc_count = len(points)
+        noise_count = sum(1 for p in points if not p.cluster_id)
     return TopicFlowResponse(
         run_id=run["run_id"],
         created_at=run["created_at"],
-        doc_count=int(run.get("doc_count", 0)),
-        noise_count=int(run.get("noise_count", 0)),
+        doc_count=doc_count,
+        noise_count=noise_count,
         embedding_model=run.get("embedding_model", ""),
         lookback_days=int(run.get("lookback_days", 30)),
         clusters=clusters,
@@ -134,7 +152,7 @@ async def latest():
 
 
 @router.get("/cluster/{cluster_id}/items/", response_model=list[ContentItemSummary])
-async def cluster_items(cluster_id: str, run_id: str, size: int = 100):
+async def cluster_items(cluster_id: str, run_id: str, size: int = 100, demo: DemoMode = False):
     es = get_es_client()
     resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
@@ -151,6 +169,7 @@ async def cluster_items(cluster_id: str, run_id: str, size: int = 100):
                     "filter": [
                         {"term": {"cluster_run_id": run_id}},
                         {"term": {"cluster_id": cluster_id}},
+                        *await demo_filters(demo),
                     ]
                 }
             },
@@ -164,7 +183,7 @@ async def cluster_items(cluster_id: str, run_id: str, size: int = 100):
 
 
 @router.get("/flow/", response_model=TopicFlowOverTime)
-async def flow(run_id: str | None = None):
+async def flow(run_id: str | None = None, demo: DemoMode = False):
     """Per-cluster daily content counts for the swimlane flow chart.
 
     Returns a continuous day axis (no interior gaps) and, for every non-noise
@@ -193,6 +212,7 @@ async def flow(run_id: str | None = None):
                         {"term": {"cluster_run_id": run_id}},
                         {"exists": {"field": "cluster_id"}},
                         {"exists": {"field": "published_at"}},
+                        *await demo_filters(demo),
                     ]
                 }
             },
@@ -226,6 +246,13 @@ async def flow(run_id: str | None = None):
                 all_days.add(db["key_as_string"])
         if daymap:
             raw[cid] = daymap
+
+    if demo:
+        kept = demo_cluster_sizes(
+            run.get("clusters", []), {cid: sum(daymap.values()) for cid, daymap in raw.items()}
+        )
+        raw = {cid: daymap for cid, daymap in raw.items() if cid in kept}
+        all_days = {day for daymap in raw.values() for day in daymap}
 
     if not all_days:
         return TopicFlowOverTime(run_id=run_id, days=[], series=[])

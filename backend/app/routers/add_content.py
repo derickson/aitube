@@ -155,19 +155,22 @@ def _md5_hash(s: str) -> str:
     return hashlib.md5(s.encode()).hexdigest()[:12]
 
 
-async def _classify(title: str, description: str, summary: str) -> str | None:
-    """Best-effort Jev categorization; never raises. `process_youtube_video_doc`
-    handles this itself for ad-hoc YouTube videos, so this covers everything else."""
+async def _classify(title: str, description: str, summary: str) -> dict[str, str | None]:
+    """Best-effort Jev categorization; never raises. Returns the `category` /
+    `subcategory` fields to spread into the doc (both None on failure).
+    `process_youtube_video_doc` handles this itself for ad-hoc YouTube videos, so
+    this covers everything else."""
     from backend.app.services.content_classifier import classify_content
 
     try:
-        category, error = await classify_content(title=title, description=description, summary=summary)
-        if error and not category:
+        fields, error = await classify_content(title=title, description=description, summary=summary)
+        if fields:
+            return fields
+        if error:
             logger.info("Could not categorize '%s': %s", title[:60], error)
-        return category
     except Exception as e:
         logger.warning("Failed to categorize '%s': %s", title[:60], e)
-        return None
+    return {"category": None, "subcategory": None}
 
 
 async def _ensure_not_in_library(url: str, detected_type: str) -> None:
@@ -464,7 +467,7 @@ async def _process_corridor(
         "duration_seconds": item["duration_seconds"],
         "thumbnail_url": item["thumbnail_url"],
         "summary": "",
-        "category": await _classify(title, description, ""),
+        **await _classify(title, description, ""),
         "interest_score": None,
         "interest_reasoning": "",
         "transcript": None,
@@ -540,7 +543,7 @@ async def _process_podcast(url: str, title_override: str | None, submission_sour
             summary_error = str(e)[:300]
             summary_error_code = SummaryErrorCode.UNKNOWN_ERROR
 
-    category = await _classify(title, "", summary)
+    category_fields = await _classify(title, "", summary)
 
     doc = {
         "subscription_id": "adhoc",
@@ -555,7 +558,7 @@ async def _process_podcast(url: str, title_override: str | None, submission_sour
         "duration_seconds": duration,
         "thumbnail_url": "",
         "summary": summary,
-        "category": category,
+        **category_fields,
         "interest_score": None,
         "interest_reasoning": "",
         "transcript": transcript,
@@ -648,7 +651,7 @@ async def _process_article(
             summary_error = str(e)[:300]
             summary_error_code = SummaryErrorCode.UNKNOWN_ERROR
 
-    category = await _classify(title, "", summary)
+    category_fields = await _classify(title, "", summary)
 
     doc = {
         "subscription_id": "adhoc",
@@ -662,7 +665,7 @@ async def _process_article(
         "duration_seconds": None,
         "thumbnail_url": thumbnail or "",
         "summary": summary,
-        "category": category,
+        **category_fields,
         "interest_score": None,
         "interest_reasoning": "",
         "transcript": None,

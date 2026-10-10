@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.app.services.clustering import load_latest_run
+from backend.app.services.demo_mode import DemoMode, count_by_cluster, demo_cluster_sizes, demo_filters
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
 
 router = APIRouter(prefix="/api/embeddings", tags=["embeddings"])
@@ -49,6 +50,7 @@ class EmbeddingPoint(BaseModel):
     subscription_id: str
     channel_name: str | None
     category: str | None
+    subcategory: str | None
     cluster_id: str | None
     cluster_label: str | None
     user_interest: str | None
@@ -67,13 +69,15 @@ class EmbeddingsResponse(BaseModel):
     points: list[EmbeddingPoint]
 
 
-async def _load_points(run_id: str, label_by_cluster: dict[str, str]) -> list[EmbeddingPoint]:
+async def _load_points(
+    run_id: str, label_by_cluster: dict[str, str], scope: list[dict[str, Any]]
+) -> list[EmbeddingPoint]:
     es = get_es_client()
     points: list[EmbeddingPoint] = []
     search_after: list[Any] | None = None
     fields = [
         "title", "type", "thumbnail_url", "published_at",
-        "subscription_id", "channel_name", "category",
+        "subscription_id", "channel_name", "category", "subcategory",
         "cluster_id", "user_interest", "consumed", "viewed",
         "engagement", "embedding3d_x", "embedding3d_y", "embedding3d_z",
     ]
@@ -81,7 +85,7 @@ async def _load_points(run_id: str, label_by_cluster: dict[str, str]) -> list[Em
         body: dict[str, Any] = {
             "size": 1000,
             "_source": fields,
-            "query": {"term": {"cluster_run_id": run_id}},
+            "query": {"bool": {"filter": [{"term": {"cluster_run_id": run_id}}, *scope]}},
             "sort": [{"external_id": {"order": "asc", "missing": "_last"}}],
         }
         if search_after:
@@ -112,6 +116,7 @@ async def _load_points(run_id: str, label_by_cluster: dict[str, str]) -> list[Em
                 subscription_id=s.get("subscription_id", "") or "",
                 channel_name=s.get("channel_name"),
                 category=s.get("category"),
+                subcategory=s.get("subcategory"),
                 cluster_id=cluster_id,
                 cluster_label=label_by_cluster.get(cluster_id) if cluster_id else None,
                 user_interest=s.get("user_interest"),
@@ -127,7 +132,7 @@ async def _load_points(run_id: str, label_by_cluster: dict[str, str]) -> list[Em
 
 
 @router.get("/latest/", response_model=EmbeddingsResponse)
-async def latest():
+async def latest(demo: DemoMode = False):
     run = await load_latest_run()
     if not run:
         raise HTTPException(status_code=404, detail="No clustering run found. Run rebuild_clusters first.")
@@ -137,7 +142,16 @@ async def latest():
         for c in run.get("clusters", [])
     ]
     label_by_cluster = {c.id: c.label for c in clusters}
-    points = await _load_points(run["run_id"], label_by_cluster)
+    points = await _load_points(run["run_id"], label_by_cluster, await demo_filters(demo))
+    if demo:
+        # Keep only clusters that are mostly in scope (see demo_cluster_sizes);
+        # the stray in-scope points of the others are shown as unclustered.
+        sizes = demo_cluster_sizes(run.get("clusters", []), count_by_cluster([p.cluster_id for p in points]))
+        clusters = [c.model_copy(update={"size": sizes[c.id]}) for c in clusters if c.id in sizes]
+        points = [
+            p if p.cluster_id in sizes else p.model_copy(update={"cluster_id": None, "cluster_label": None})
+            for p in points
+        ]
 
     return EmbeddingsResponse(
         run_id=run["run_id"],

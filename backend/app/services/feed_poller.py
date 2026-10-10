@@ -240,13 +240,13 @@ async def process_youtube_video_doc(doc: dict[str, Any]) -> dict[str, Any] | Non
     # Categorize (title/description/summary — cheap, so run even if summarization failed)
     try:
         from backend.app.services.content_classifier import classify_content
-        category, category_error = await classify_content(
+        category_fields, category_error = await classify_content(
             title=doc.get("title", ""),
             description=doc.get("metadata", {}).get("description", ""),
             summary=doc.get("summary", ""),
         )
-        if category:
-            doc["category"] = category
+        if category_fields:
+            doc.update(category_fields)
         elif category_error:
             logger.info("Could not categorize %s: %s", doc.get("title", url), category_error)
     except Exception as e:
@@ -691,13 +691,13 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
 
             try:
                 from backend.app.services.content_classifier import classify_content
-                category, category_error = await classify_content(
+                category_fields, category_error = await classify_content(
                     title=doc.get("title", ""),
                     description=doc.get("metadata", {}).get("description", ""),
                     summary=doc.get("summary", ""),
                 )
-                if category:
-                    doc["category"] = category
+                if category_fields:
+                    doc.update(category_fields)
                 elif category_error:
                     logger.info("Could not categorize %s: %s", doc["title"], category_error)
             except Exception as e:
@@ -1109,14 +1109,16 @@ async def backfill_missing_summaries(limit: int = 10) -> int:
 
 async def backfill_missing_categories(limit: int = 15) -> int:
     """Categorize recent content items that came through without a `category`
-    (e.g. the classifier call failed or Jev was unconfigured at ingest time).
+    (e.g. the classifier call failed or Jev was unconfigured at ingest time), or
+    in a category that has subcategories but without a `subcategory`.
 
     Only targets items from the last 5 days, matching backfill_missing_summaries.
     The one-time full-corpus pass lives in scripts/backfill_categories.py.
     Processes at most `limit` items per cycle. Returns the number backfilled.
     """
-    from backend.app.services.content_classifier import classify_content
+    from backend.app.services.content_classifier import classify_content, get_categories
 
+    labels_with_subs = [c["label"] for c in await get_categories() if c.get("subcategories")]
     es = get_es_client()
     resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
@@ -1124,7 +1126,14 @@ async def backfill_missing_categories(limit: int = 15) -> int:
             "query": {
                 "bool": {
                     "must": [{"range": {"discovered_at": {"gte": "now-5d"}}}],
-                    "must_not": [{"exists": {"field": "category"}}],
+                    "should": [
+                        {"bool": {"must_not": [{"exists": {"field": "category"}}]}},
+                        {"bool": {
+                            "filter": [{"terms": {"category": labels_with_subs}}],
+                            "must_not": [{"exists": {"field": "subcategory"}}],
+                        }},
+                    ],
+                    "minimum_should_match": 1,
                 }
             },
             "_source": ["title", "summary", "metadata"],
@@ -1142,13 +1151,13 @@ async def backfill_missing_categories(limit: int = 15) -> int:
         src = hit["_source"]
         title = src.get("title", "?")
         try:
-            category, error = await classify_content(
+            fields, error = await classify_content(
                 title=title,
                 description=(src.get("metadata") or {}).get("description", ""),
                 summary=src.get("summary", ""),
             )
-            if category:
-                await es.update(index=CONTENT_ITEMS_INDEX, id=doc_id, body={"doc": {"category": category}})
+            if fields:
+                await es.update(index=CONTENT_ITEMS_INDEX, id=doc_id, body={"doc": fields})
                 backfilled += 1
             elif error:
                 logger.info("Backfill: could not categorize '%s' (%s): %s", title[:60], doc_id, error)

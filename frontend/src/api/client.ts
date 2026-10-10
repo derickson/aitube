@@ -1,12 +1,24 @@
 const BASE = "/aitube/api";
 
+// Demo Mode (see demo/DemoMode.tsx) is sent on every request so the backend can
+// restrict all content to the demo category — backend/app/services/demo_mode.py.
+let demoMode = false;
+
+export function setApiDemoMode(on: boolean): void {
+  demoMode = on;
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(demoMode ? { "X-Demo-Mode": "1" } : {}),
+      ...options?.headers,
+    },
   });
   if (!res.ok) {
     throw new Error(`API error ${res.status}: ${await res.text()}`);
@@ -78,6 +90,7 @@ export interface ContentItemSummary {
   summary: string;
   summary_error_code: string | null;
   category: string | null;
+  subcategory: string | null;
   interest_score: number | null;
   user_interest: "up" | "down" | null;
   consumed: boolean;
@@ -192,6 +205,8 @@ export function searchContent(params?: {
   interest?: "up" | "down" | "none";
   category_include?: string;
   category_exclude?: string;
+  subcategory_include?: string;
+  subcategory_exclude?: string;
   q?: string;
   sort?: "date" | "relevance";
   size?: number;
@@ -204,6 +219,8 @@ export function searchContent(params?: {
   if (params?.interest) search.set("interest", params.interest);
   if (params?.category_include) search.set("category_include", params.category_include);
   if (params?.category_exclude) search.set("category_exclude", params.category_exclude);
+  if (params?.subcategory_include) search.set("subcategory_include", params.subcategory_include);
+  if (params?.subcategory_exclude) search.set("subcategory_exclude", params.subcategory_exclude);
   if (params?.q) search.set("q", params.q);
   if (params?.sort) search.set("sort", params.sort);
   if (params?.size !== undefined) search.set("size", String(params.size));
@@ -415,6 +432,7 @@ export interface EmbeddingPoint {
   subscription_id: string;
   channel_name: string | null;
   category: string | null;
+  subcategory: string | null;
   cluster_id: string | null;
   cluster_label: string | null;
   user_interest: string | null;
@@ -679,10 +697,14 @@ export function getEngagementReport(): Promise<EngagementReport> {
 
 // --- Category settings ---
 
-export interface CategoryConfig {
+export interface SubcategoryConfig {
   slug: string;
   label: string;
   description: string;
+}
+
+export interface CategoryConfig extends SubcategoryConfig {
+  subcategories: SubcategoryConfig[];
 }
 
 export interface CategorySettingsResponse {

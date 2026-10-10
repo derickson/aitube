@@ -10,6 +10,7 @@ import {
 } from "../api/client";
 import { ContentView } from "./ContentView";
 import { ErrorBanner } from "./ErrorBanner";
+import { useDemoMode } from "../demo/DemoMode";
 
 const PALETTE = [
   "#4f46e5", "#e11d48", "#16a34a", "#d97706", "#0ea5e9",
@@ -18,7 +19,10 @@ const PALETTE = [
   "#0d9488", "#9333ea", "#b91c1c", "#1d4ed8", "#15803d",
 ];
 const UNKNOWN_COLOR = "#9ca3af";
-const FALLBACK_LABELS = new Set(["Uncategorized", "Noise", "Unknown", "Unscored", "Unseen"]);
+const FALLBACK_LABELS = new Set(["Uncategorized", "No topic", "Noise", "Unknown", "Unscored", "Unseen"]);
+
+// Fits every Topic (16 AI and Software subcategories) plus its fallback bucket.
+const LEGEND_MAX = 18;
 
 const IDLE_RESUME_MS = 5000;
 const BOX_HALF_EXTENT = 8;
@@ -35,10 +39,11 @@ function radiusForCount(n: number): number {
   return Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, r));
 }
 
-type ColorDim = "category" | "cluster" | "channel" | "prediction" | "watch";
+type ColorDim = "category" | "subcategory" | "cluster" | "channel" | "prediction" | "watch";
 
 const COLOR_DIM_OPTIONS: { value: ColorDim; label: string }[] = [
   { value: "category", label: "Category" },
+  { value: "subcategory", label: "Topic" },
   { value: "cluster", label: "Topic Cluster" },
   { value: "channel", label: "Channel" },
   { value: "prediction", label: "Prediction" },
@@ -64,6 +69,7 @@ function predictionLabel(p: EmbeddingPoint): string {
 function bucketKey(p: EmbeddingPoint, dim: ColorDim): string {
   switch (dim) {
     case "category": return p.category || "Uncategorized";
+    case "subcategory": return p.subcategory || "No topic";
     case "cluster": return p.cluster_label || "Noise";
     case "channel": return p.channel_name || "Unknown";
     case "prediction": return predictionLabel(p);
@@ -146,9 +152,16 @@ export function EmbeddingsView() {
   // Initial values are read once from the URL so a refresh or a pasted link
   // restores the exact same view (position/color choice, filter, flyout).
   const [embeddingKey, setEmbeddingKey] = useState<string>(() => searchParams.get("embed") ?? "clustering");
-  const [colorDim, setColorDim] = useState<ColorDim>(
-    () => (searchParams.get("color") as ColorDim | null) ?? "category",
-  );
+  // Demo Mode shows a single category, so coloring by category would paint every
+  // point the same — Topic (subcategory) is the default there and Category is
+  // not offered. The page remounts when Demo Mode flips (see App.tsx).
+  const { demoMode } = useDemoMode();
+  const defaultColorDim: ColorDim = demoMode ? "subcategory" : "category";
+  const colorDimOptions = demoMode ? COLOR_DIM_OPTIONS.filter((o) => o.value !== "category") : COLOR_DIM_OPTIONS;
+  const [colorDim, setColorDim] = useState<ColorDim>(() => {
+    const fromUrl = searchParams.get("color") as ColorDim | null;
+    return fromUrl && colorDimOptions.some((o) => o.value === fromUrl) ? fromUrl : defaultColorDim;
+  });
   const [filterMode, setFilterMode] = useState<FilterMode>(
     () => (searchParams.get("watch") === "unseen" ? "unseen" : "all"),
   );
@@ -198,7 +211,7 @@ export function EmbeddingsView() {
   useEffect(() => {
     const params = new URLSearchParams();
     if (embeddingKey && embeddingKey !== "clustering") params.set("embed", embeddingKey);
-    if (colorDim !== "category") params.set("color", colorDim);
+    if (colorDim !== defaultColorDim) params.set("color", colorDim);
     if (filterMode === "unseen") params.set("watch", "unseen");
     if (selectedItemId) params.set("item", selectedItemId);
     setSearchParams(params, { replace: true });
@@ -473,21 +486,21 @@ export function EmbeddingsView() {
             <label className="embeddings-control-row">
               <span>Color by</span>
               <select value={colorDim} onChange={(e) => setColorDim(e.target.value as ColorDim)}>
-                {COLOR_DIM_OPTIONS.map((o) => (
+                {colorDimOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </label>
             <div className="embeddings-legend">
-              {legend.slice(0, 14).map((entry) => (
+              {legend.slice(0, LEGEND_MAX).map((entry) => (
                 <div key={entry.key} className="embeddings-legend-row">
                   <span className="embeddings-legend-swatch" style={{ background: entry.color }} />
                   <span className="embeddings-legend-label">{entry.key}</span>
                   <span className="embeddings-legend-count">{entry.count}</span>
                 </div>
               ))}
-              {legend.length > 14 && (
-                <div className="embeddings-legend-more">+{legend.length - 14} more</div>
+              {legend.length > LEGEND_MAX && (
+                <div className="embeddings-legend-more">+{legend.length - LEGEND_MAX} more</div>
               )}
             </div>
             <div className="embeddings-hint">
@@ -504,6 +517,7 @@ export function EmbeddingsView() {
               <div className="embeddings-tooltip-meta">
                 {hover.point.channel_name || "Unknown channel"}
                 {hover.point.category ? ` · ${hover.point.category}` : ""}
+                {hover.point.subcategory ? ` · ${hover.point.subcategory}` : ""}
               </div>
             </div>
           )}

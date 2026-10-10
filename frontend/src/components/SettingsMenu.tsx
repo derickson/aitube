@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
+import { useDemoMode } from "../demo/DemoMode";
 
 function GearIcon() {
   return (
@@ -19,6 +20,7 @@ function GearIcon() {
 
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
+  const { demoMode, setDemoMode } = useDemoMode();
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
@@ -52,6 +54,21 @@ export function SettingsMenu() {
       </button>
       {open && (
         <div className="settings-dropdown" role="menu">
+          <label
+            className="settings-switch-row"
+            role="menuitemcheckbox"
+            aria-checked={demoMode}
+            title="Show only AI and Software content across the whole site"
+          >
+            <span>Demo Mode</span>
+            <input
+              type="checkbox"
+              className="settings-switch"
+              checked={demoMode}
+              onChange={(e) => setDemoMode(e.target.checked)}
+            />
+          </label>
+          <div className="settings-divider" role="separator" />
           <NavLink to="/subscriptions/" role="menuitem" onClick={close}>
             Content
           </NavLink>

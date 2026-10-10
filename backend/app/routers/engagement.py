@@ -14,6 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.app.services import engagement_analysis as ea
+from backend.app.services.demo_mode import DemoMode, demo_filters
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -170,13 +171,17 @@ class EngagementReportResponse(BaseModel):
 
 
 @router.get("/report/", response_model=EngagementReportResponse)
-async def engagement_report():
+async def engagement_report(demo: DemoMode = False):
     es = get_es_client()
     now = datetime.now(timezone.utc)
 
     items_resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
-        body={"query": {"match_all": {}}, "_source": _SOURCE_FIELDS, "size": 10000},
+        body={
+            "query": {"bool": {"filter": await demo_filters(demo)}},
+            "_source": _SOURCE_FIELDS,
+            "size": 10000,
+        },
     )
     hits = items_resp["hits"]["hits"]
 
@@ -197,6 +202,11 @@ async def engagement_report():
         body={"query": {"match_all": {}}, "size": 1000},
     )
     subscriptions = {hit["_id"]: hit["_source"] for hit in subs_resp["hits"]["hits"]}
+    if demo:
+        # Channels are derived from the (already demo-filtered) items; drop the
+        # rest so no out-of-scope subscription surfaces in the report.
+        in_scope = {hit["_source"].get("subscription_id") for hit in hits}
+        subscriptions = {k: v for k, v in subscriptions.items() if k in in_scope}
 
     # Calibrate SETTLE_DAYS from observed playback lag before classifying anything.
     lag_days = []

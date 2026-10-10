@@ -33,6 +33,12 @@ uv run python -m backend.scripts.clean_feed_markup --dry-run   # report only
 uv run python -m backend.scripts.clean_feed_markup             # rewrite title/description/author
 ```
 
+**Backfilling topics (subcategories) for already-categorized items:**
+```bash
+uv run python -m backend.scripts.backfill_categories --missing-subcategory --dry-run --limit 40
+uv run python -m backend.scripts.backfill_categories --missing-subcategory
+```
+
 **Evaluating summarizers (Haiku vs Hermes/GPT-5.4 mini):**
 ```bash
 HERMES_ENABLED=true uv run python -m backend.scripts.eval_summarizers --n 30
@@ -55,13 +61,16 @@ AITube is a self-hosted feed reader that unifies YouTube, podcasts, and RSS into
   - `summary_eval.py` — head-to-head Haiku vs Hermes: runs both engines on one item, applies deterministic format checks, and scores them with a neutral Claude Sonnet judge (blind + A/B-randomized). Backs `scripts/eval_summarizers.py`.
   - `feed_text.py` — `clean_feed_text()`: the single sanitizer for free text pulled out of feed XML. Unwraps CDATA, resolves HTML entities, strips markup, drops control chars. Needed because `<title>` is an RCDATA element for BeautifulSoup's HTML parser, so a `<![CDATA[...]]>` section inside it arrives as literal text (elsewhere bs4 unwraps it into a `CData` node). Applied in `_parse_rss_feed_entry`, `_parse_youtube_feed_entry`, `_parse_dlp_item` (the last gate before indexing, so podcast items from content-dlp are covered too) and `url_resolver`.
   - `corridor.py` — metadata-only client for Corridor Digital (corridordigital.com), which has no RSS or public API. Reads the site's own *unauthenticated* JSON endpoints on `content-cache.corridordigital.com` (`channels/v16/season/{id}` = a show + every episode, `v3/metadata/{id}` = one video's title/HTML description/primary `seasonId`). Playback is Widevine DRM behind the user's login, so AI Tube never fetches video, audio, or subtitles, and never summarizes or transcribes these items: they're indexed as `type: "video"` with `external_id: "corridor_{mediaId}"` and the flyout shows a "Watch on Corridor" link (clicking it marks the item consumed). `backfill_missing_transcripts` excludes the `corridor_` prefix. Endpoints are undocumented and versioned, so parsers tolerate missing fields.
+  - `content_classifier.py` — Jev (OpenRouter decisions model) categorization against the editable taxonomy in `aitube-category-config`. A category may carry **subcategories** (shown as "Topics" in the UI; today only AI and Software has them, 16 topics reverse-engineered from the AI Engineer World's Fair tracks plus the rest of the corpus). Jev answers the category and one subcategory question per category-with-subcategories in a **single** decisions call, and `classify_content()` returns `({"category", "subcategory"}, error)`, the partial doc to write; subcategory is None (clearing stale values) when the chosen category has none. A stored category with no `subcategories` key gets the bootstrap `SUBCATEGORIES` defaults, but an explicitly saved `[]` means none.
+  - `demo_mode.py` — Demo Mode (a per-browser flip switch in the settings dropdown, persisted in localStorage) restricts the whole site to the AI and Software category (looked up by slug `ai_software`, so renaming the label doesn't break it). The frontend's `apiFetch` sends `X-Demo-Mode: 1`, and every content-bearing router takes the `DemoMode` dependency and ANDs in `demo_filters()`: content search (+ cache key), predictions, single-item GET (404 out of scope), quarantine stats, topic flow, embeddings, subscriptions (sources with no in-scope items are hidden), and the engagement report. Clustering runs span the whole corpus, so in Demo Mode a cluster is kept only if ≥50% of its members are in scope (`demo_cluster_sizes`); otherwise its label (e.g. a gaming cluster with two stray AI items) would leak. It's a presentation filter, not access control.
   - `metadata_extractor.py` — Claude Haiku for extracting podcast titles from transcripts and article metadata from scraped markdown
   - `elasticsearch.py` — Async ES client with index mappings and lifecycle
 - **Config** (`backend/app/config.py`): Pydantic Settings reading from `.env`. Key: `content_dlp_url` defaults to localhost:7055, overridden to `host.docker.internal:7055` in Docker via `docker-compose.yml` environment block.
 
 ### Frontend (React 19 + TypeScript + Vite)
 
-- `Timeline.tsx` — Main view with facet sidebar (type, status, interest, source subscription) and content card grid
+- `Timeline.tsx` — Main view with facet sidebar (type, status, interest, category, topic, source subscription) and content card grid. Category and Topic are tri-state (+ require / − mute); the Category facet is hidden in Demo Mode, where it would be a single bucket
+- `demo/DemoMode.tsx` — Demo Mode context + localStorage persistence; `App.tsx` keys `<Routes>` on it so flipping the switch remounts (and refetches) the current page. `EmbeddingsView` colors by Topic by default in Demo Mode and drops the Category option
 - `ContentView.tsx` — Flyout panel with YouTube/audio players, article reader, transcript viewer with auto-scroll
 - `AddContent.tsx` — Ad-hoc content submission with URL preview and confirm flow (YouTube, podcast MP3, article)
 - `api/client.ts` — Typed fetch wrapper for all API calls
@@ -92,7 +101,7 @@ Vite config sets `base: "/aitube/"` and proxies `/aitube/api` to backend in dev 
 ### Elasticsearch Indices
 
 - `aitube-subscriptions` — Feed subscriptions (youtube_channel, podcast, rss, corridor_show). A `corridor_show` URL is the canonical `https://www.corridordigital.com/season/{id}`; pasting a Corridor *video* URL into Add Subscription subscribes to that video's primary show, while pasting a show URL into Add Content is rejected with a pointer to Subscriptions.
-- `aitube-content-items` — All content with full-text search, facets on type/subscription_id/consumed/viewed/user_interest. `summary_error`/`summary_failed_at` record the last summarization failure (cleared on success) so failed summaries can be found and retried.
+- `aitube-content-items` — All content with full-text search, facets on type/subscription_id/consumed/viewed/user_interest/category/subcategory. `summary_error`/`summary_failed_at` record the last summarization failure (cleared on success) so failed summaries can be found and retried.
 - `aitube-playback-state` — Playback position tracking
 - `aitube-quarantine-events` — Audit log of post-ingest quarantines (one row per item; subsequent calls are no-ops)
 - `aitube-summary-evals` — Haiku-vs-Hermes summarization eval records (both summaries, format violations, latency, judge scores/winner)

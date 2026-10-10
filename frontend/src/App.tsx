@@ -15,10 +15,12 @@ import { NotFound } from "./components/NotFound";
 import { ThemeToggle } from "./theme/ThemeToggle";
 import { SettingsMenu } from "./components/SettingsMenu";
 import { getInitialTheme, applyTheme } from "./theme/theme";
+import { DemoModeProvider, useDemoMode } from "./demo/DemoMode";
 import type { Theme } from "./theme/theme";
 
 function AppContent() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const { demoMode } = useDemoMode();
 
   useEffect(() => {
     applyTheme(theme);
@@ -36,6 +38,11 @@ function AppContent() {
           onClick={() => window.location.href = "/aitube/"}
         />
         <h1><span className="logo-ai">AI</span>Tube</h1>
+        {demoMode && (
+          <span className="demo-badge" title="Demo Mode: showing AI and Software content only">
+            Demo
+          </span>
+        )}
         <nav>
           <NavLink to="/">Timeline</NavLink>
           <NavLink to="/search/">Search</NavLink>
@@ -47,7 +54,9 @@ function AppContent() {
         <SettingsMenu />
       </header>
       <main>
-        <Routes>
+        {/* Keyed on Demo Mode so flipping it remounts the current page, which
+            refetches everything under the new scope. */}
+        <Routes key={demoMode ? "demo" : "full"}>
           <Route path="/" element={<Timeline />} />
           <Route path="/search/" element={<Search />} />
           <Route path="/topic-flow/" element={<TopicFlow />} />
@@ -69,7 +78,9 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter basename="/aitube/">
-      <AppContent />
+      <DemoModeProvider>
+        <AppContent />
+      </DemoModeProvider>
     </BrowserRouter>
   );
 }

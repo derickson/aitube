@@ -17,9 +17,75 @@ import {
 import { ContentView } from "./ContentView";
 import { ErrorBanner } from "./ErrorBanner";
 import { ContentCard, TYPE_LABELS } from "./ContentCard";
+import { useDemoMode } from "../demo/DemoMode";
 
 function facetCount(buckets: FacetBucket[] | undefined, key: string): number {
   return buckets?.find((b) => b.key === key)?.count ?? 0;
+}
+
+type TriState = Record<string, "include" | "exclude">;
+
+/** Tri-state per label: "include" (+), "exclude" (-, muted), or absent (neutral),
+ *  seeded once from the given include/exclude URL params. */
+function useTriStateFilter(inCsv: string | null, outCsv: string | null) {
+  const [state, setState] = useState<TriState>(() => {
+    const initial: TriState = {};
+    for (const label of (inCsv ?? "").split(",")) {
+      if (label) initial[label] = "include";
+    }
+    for (const label of (outCsv ?? "").split(",")) {
+      if (label) initial[label] = "exclude";
+    }
+    return initial;
+  });
+
+  const cycle = useCallback((label: string) => {
+    setState((prev) => {
+      const current = prev[label];
+      const next = { ...prev };
+      if (!current) next[label] = "include";
+      else if (current === "include") next[label] = "exclude";
+      else delete next[label];
+      return next;
+    });
+  }, []);
+  const clear = useCallback(() => setState({}), []);
+
+  const includeCsv = Object.keys(state).filter((k) => state[k] === "include").join(",");
+  const excludeCsv = Object.keys(state).filter((k) => state[k] === "exclude").join(",");
+  return { state, cycle, clear, includeCsv, excludeCsv };
+}
+
+function TriStateFacet({ heading, labels, filter, buckets }: {
+  heading: string;
+  labels: string[];
+  filter: ReturnType<typeof useTriStateFilter>;
+  buckets: FacetBucket[];
+}) {
+  return (
+    <div className="facet-group">
+      <h4 className="facet-heading">{heading}</h4>
+      {Object.keys(filter.state).length > 0 && (
+        <button className="facet-item" onClick={filter.clear}>
+          <span>Clear</span>
+        </button>
+      )}
+      {labels.map((label) => {
+        const state = filter.state[label];
+        return (
+          <button
+            key={label}
+            className={`facet-item facet-category${state === "include" ? " category-included" : ""}${state === "exclude" ? " category-excluded" : ""}`}
+            onClick={() => filter.cycle(label)}
+            title={state === "include" ? "Required — click to mute" : state === "exclude" ? "Muted — click to clear" : "Click to require"}
+          >
+            <span>{state === "include" ? "+ " : state === "exclude" ? "− " : ""}{label}</span>
+            <span className="facet-count">{facetCount(buckets, label)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // consumedFilter's default ("false" — unwatched) differs from the URL's
@@ -52,11 +118,19 @@ export function Timeline() {
   // otherwise a renamed/added/removed category never shows up here even after
   // items have been relabeled.
   const [categoryLabels, setCategoryLabels] = useState<string[]>([...CATEGORY_LABELS]);
+  // Topic = subcategory, of whichever categories have them (today: AI and Software).
+  const [topicLabels, setTopicLabels] = useState<string[]>([]);
   useEffect(() => {
     getCategorySettings()
-      .then((r) => setCategoryLabels(r.categories.map((c) => c.label)))
+      .then((r) => {
+        setCategoryLabels(r.categories.map((c) => c.label));
+        setTopicLabels(r.categories.flatMap((c) => c.subcategories.map((s) => s.label)));
+      })
       .catch(() => {});
   }, []);
+  // In Demo Mode the backend restricts everything to one category, so the
+  // Category facet would be a single bucket — hide it and its filter.
+  const { demoMode } = useDemoMode();
 
   const consumedFilterRef = useRef<"true" | "false" | "">("false");
   const interestFilterRef = useRef<"up" | "down" | "none" | "">("");
@@ -101,37 +175,17 @@ export function Timeline() {
   const [consumedFilter, setConsumedFilter] = useState<"true" | "false" | "">(
     () => readConsumedParam(searchParams.get("consumed")),
   );
-  // Tri-state per category: "include" (+), "exclude" (-, muted), or absent (neutral).
-  const [categoryState, setCategoryState] = useState<Record<string, "include" | "exclude">>(() => {
-    const initial: Record<string, "include" | "exclude"> = {};
-    for (const label of (searchParams.get("cat_in") ?? "").split(",")) {
-      if (label) initial[label] = "include";
-    }
-    for (const label of (searchParams.get("cat_out") ?? "").split(",")) {
-      if (label) initial[label] = "exclude";
-    }
-    return initial;
-  });
+  const categoryFilter = useTriStateFilter(searchParams.get("cat_in"), searchParams.get("cat_out"));
+  const topicFilter = useTriStateFilter(searchParams.get("topic_in"), searchParams.get("topic_out"));
   // Client-side filter for the Source facet list
   const [subSearch, setSubSearch] = useState("");
   consumedFilterRef.current = consumedFilter;
   interestFilterRef.current = interestFilter;
 
-  const cycleCategory = useCallback((label: string) => {
-    setCategoryState((prev) => {
-      const current = prev[label];
-      const next = { ...prev };
-      if (!current) next[label] = "include";
-      else if (current === "include") next[label] = "exclude";
-      else delete next[label];
-      return next;
-    });
-  }, []);
-
-  const categoryInclude = Object.keys(categoryState).filter((k) => categoryState[k] === "include");
-  const categoryExclude = Object.keys(categoryState).filter((k) => categoryState[k] === "exclude");
-  const categoryIncludeCsv = categoryInclude.join(",");
-  const categoryExcludeCsv = categoryExclude.join(",");
+  const categoryIncludeCsv = demoMode ? "" : categoryFilter.includeCsv;
+  const categoryExcludeCsv = demoMode ? "" : categoryFilter.excludeCsv;
+  const topicIncludeCsv = topicFilter.includeCsv;
+  const topicExcludeCsv = topicFilter.excludeCsv;
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -149,6 +203,8 @@ export function Timeline() {
           interest: (interestFilter || undefined) as "up" | "down" | "none" | undefined,
           category_include: categoryIncludeCsv || undefined,
           category_exclude: categoryExcludeCsv || undefined,
+          subcategory_include: topicIncludeCsv || undefined,
+          subcategory_exclude: topicExcludeCsv || undefined,
           size: 200,
         }),
         listSubscriptions(),
@@ -174,7 +230,7 @@ export function Timeline() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, typeFilter, subFilter, consumedFilter, interestFilter, categoryIncludeCsv, categoryExcludeCsv]);
+  }, [debouncedSearch, typeFilter, subFilter, consumedFilter, interestFilter, categoryIncludeCsv, categoryExcludeCsv, topicIncludeCsv, topicExcludeCsv]);
 
   useEffect(() => {
     fetchData();
@@ -190,12 +246,16 @@ export function Timeline() {
     if (subFilter) params.set("sub", subFilter);
     if (consumedFilter === "") params.set("consumed", "all");
     else if (consumedFilter !== "false") params.set("consumed", consumedFilter);
-    if (categoryIncludeCsv) params.set("cat_in", categoryIncludeCsv);
-    if (categoryExcludeCsv) params.set("cat_out", categoryExcludeCsv);
+    // Category state is kept in the URL even while Demo Mode ignores it, so
+    // turning Demo Mode off restores the previous view.
+    if (categoryFilter.includeCsv) params.set("cat_in", categoryFilter.includeCsv);
+    if (categoryFilter.excludeCsv) params.set("cat_out", categoryFilter.excludeCsv);
+    if (topicIncludeCsv) params.set("topic_in", topicIncludeCsv);
+    if (topicExcludeCsv) params.set("topic_out", topicExcludeCsv);
     if (selectedId) params.set("item", selectedId);
     setSearchParams(params, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, typeFilter, interestFilter, subFilter, consumedFilter, categoryIncludeCsv, categoryExcludeCsv, selectedId]);
+  }, [debouncedSearch, typeFilter, interestFilter, subFilter, consumedFilter, categoryFilter.includeCsv, categoryFilter.excludeCsv, topicIncludeCsv, topicExcludeCsv, selectedId]);
 
   useEffect(() => {
     if (selectedId && window.innerWidth <= 768) {
@@ -240,6 +300,7 @@ export function Timeline() {
   const consumedBuckets = facets.consumed ?? [];
   const interestBuckets = facets.interest ?? [];
   const categoryBuckets = facets.category ?? [];
+  const topicBuckets = facets.subcategory ?? [];
   const subBuckets = (facets.subscription_id ?? [])
     .sort((a, b) => {
       const nameA = subs[a.key]?.name ?? a.key;
@@ -339,28 +400,13 @@ export function Timeline() {
             </button>
           </div>
 
-          <div className="facet-group">
-            <h4 className="facet-heading">Category</h4>
-            {Object.keys(categoryState).length > 0 && (
-              <button className="facet-item" onClick={() => setCategoryState({})}>
-                <span>Clear</span>
-              </button>
-            )}
-            {categoryLabels.map((label) => {
-              const state = categoryState[label];
-              return (
-                <button
-                  key={label}
-                  className={`facet-item facet-category${state === "include" ? " category-included" : ""}${state === "exclude" ? " category-excluded" : ""}`}
-                  onClick={() => cycleCategory(label)}
-                  title={state === "include" ? "Required — click to mute" : state === "exclude" ? "Muted — click to clear" : "Click to require"}
-                >
-                  <span>{state === "include" ? "+ " : state === "exclude" ? "− " : ""}{label}</span>
-                  <span className="facet-count">{facetCount(categoryBuckets, label)}</span>
-                </button>
-              );
-            })}
-          </div>
+          {!demoMode && (
+            <TriStateFacet heading="Category" labels={categoryLabels} filter={categoryFilter} buckets={categoryBuckets} />
+          )}
+
+          {topicLabels.length > 0 && (
+            <TriStateFacet heading="Topic" labels={topicLabels} filter={topicFilter} buckets={topicBuckets} />
+          )}
 
           <div className="facet-group">
             <h4 className="facet-heading">Source</h4>

@@ -8,7 +8,7 @@ recategorize sweep relabels them under the current taxonomy.
 
 The recategorize sweep re-runs classify_content for every content item and
 writes results back via the Bulk API's partial `doc` update, touching only
-the `category` field — not a full-document reindex — so it doesn't churn
+the `category` and `subcategory` fields — not a full-document reindex — so it doesn't churn
 unrelated fields (in particular the semantic_text/copy_to fields on the v2
 index, which would otherwise be re-embedded for no reason). It's a
 full-corpus scan, so it runs as a detached background task; progress is
@@ -38,20 +38,28 @@ _SOURCE_FIELDS = ["title", "summary", "metadata"]
 # ---- settings ---------------------------------------------------------------
 
 
-class CategoryIn(BaseModel):
+class SubcategoryIn(BaseModel):
     slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_]+$")
     label: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1, max_length=1000)
+
+
+class CategoryIn(SubcategoryIn):
+    subcategories: list[SubcategoryIn] = []
 
 
 class CategorySettingsIn(BaseModel):
     categories: list[CategoryIn]
 
 
-class CategoryOut(BaseModel):
+class SubcategoryOut(BaseModel):
     slug: str
     label: str
     description: str
+
+
+class CategoryOut(SubcategoryOut):
+    subcategories: list[SubcategoryOut] = []
 
 
 class CategorySettingsOut(BaseModel):
@@ -71,6 +79,10 @@ async def update_category_settings(body: CategorySettingsIn):
     slugs = [c.slug for c in body.categories]
     if len(set(slugs)) != len(slugs):
         raise HTTPException(status_code=400, detail="Category slugs must be unique")
+    for c in body.categories:
+        sub_slugs = [s.slug for s in c.subcategories]
+        if len(set(sub_slugs)) != len(sub_slugs):
+            raise HTTPException(status_code=400, detail=f"Subcategory slugs under '{c.label}' must be unique")
 
     await content_classifier.set_categories([c.model_dump() for c in body.categories])
     categories = await content_classifier.get_categories(force_refresh=True)
@@ -118,16 +130,18 @@ async def recategorize_status():
     return _recategorize_state
 
 
-async def _classify_one(sem: asyncio.Semaphore, hit: dict[str, Any]) -> tuple[str, str | None, str | None]:
-    """Returns (doc_id, category, error)."""
+async def _classify_one(
+    sem: asyncio.Semaphore, hit: dict[str, Any]
+) -> tuple[str, dict[str, str | None] | None, str | None]:
+    """Returns (doc_id, category/subcategory fields, error)."""
     src = hit["_source"]
     async with sem:
-        category, error = await classify_content(
+        fields, error = await classify_content(
             title=src.get("title", ""),
             description=(src.get("metadata") or {}).get("description", ""),
             summary=src.get("summary", ""),
         )
-    return hit["_id"], category, error
+    return hit["_id"], fields, error
 
 
 async def _run_recategorize() -> None:
@@ -178,13 +192,13 @@ async def _run_recategorize() -> None:
 
                 results = await asyncio.gather(*(_classify_one(sem, hit) for hit in hits))
 
-                # Partial `doc` update via the bulk API — only the `category` field is
+                # Partial `doc` update via the bulk API — only category/subcategory are
                 # sent, so this doesn't reindex/re-vectorize any other field.
                 actions: list[dict[str, Any]] = []
-                for doc_id, category, error in results:
-                    if category:
+                for doc_id, fields, error in results:
+                    if fields:
                         actions.append({"update": {"_index": CONTENT_ITEMS_INDEX, "_id": doc_id}})
-                        actions.append({"doc": {"category": category}})
+                        actions.append({"doc": fields})
                         _recategorize_state["categorized"] += 1
                     else:
                         _recategorize_state["failed"] += 1

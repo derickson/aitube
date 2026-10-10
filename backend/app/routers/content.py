@@ -11,6 +11,7 @@ from backend.app.config import settings
 from backend.app.models.content import ContentItem, ContentItemSummary
 from backend.app.services import content_cache
 from backend.app.services.corridor import EXTERNAL_ID_PREFIX as CORRIDOR_PREFIX
+from backend.app.services.demo_mode import DemoMode, demo_filters, in_demo_scope
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -40,16 +41,20 @@ async def list_content(
     interest: str | None = None,  # "up", "down", "none", or None for all
     category_include: str | None = None,  # comma-separated category labels to require ("+")
     category_exclude: str | None = None,  # comma-separated category labels to mute ("-")
+    subcategory_include: str | None = None,  # comma-separated subcategory labels to require ("+")
+    subcategory_exclude: str | None = None,  # comma-separated subcategory labels to mute ("-")
     q: str | None = None,
     sort: str = "date",  # "date" or "relevance"
     size: int = Query(default=50, le=200),
     offset: int = 0,
+    demo: DemoMode = False,
 ):
     cache_params = {
         "subscription_id": subscription_id, "content_type": content_type,
         "consumed": consumed, "interest": interest,
         "category_include": category_include, "category_exclude": category_exclude,
-        "q": q, "sort": sort, "size": size, "offset": offset,
+        "subcategory_include": subcategory_include, "subcategory_exclude": subcategory_exclude,
+        "q": q, "sort": sort, "size": size, "offset": offset, "demo": demo,
     }
     cached = content_cache.get(cache_params)
     if cached is not None:
@@ -57,7 +62,7 @@ async def list_content(
 
     es = get_es_client()
     must: list[dict[str, Any]] = []
-    filter_clauses: list[dict[str, Any]] = []
+    filter_clauses: list[dict[str, Any]] = await demo_filters(demo)
 
     if subscription_id:
         filter_clauses.append({"term": {"subscription_id": subscription_id}})
@@ -91,6 +96,14 @@ async def list_content(
         excluded = [c for c in category_exclude.split(",") if c]
         if excluded:
             filter_clauses.append({"bool": {"must_not": {"terms": {"category": excluded}}}})
+    if subcategory_include:
+        included = [c for c in subcategory_include.split(",") if c]
+        if included:
+            filter_clauses.append({"terms": {"subcategory": included}})
+    if subcategory_exclude:
+        excluded = [c for c in subcategory_exclude.split(",") if c]
+        if excluded:
+            filter_clauses.append({"bool": {"must_not": {"terms": {"subcategory": excluded}}}})
     lexical_match: dict[str, Any] | None = None
     if q:
         lexical_match = {
@@ -116,8 +129,8 @@ async def list_content(
         "includes": [
             "subscription_id", "external_id", "type", "title", "url",
             "published_at", "discovered_at", "duration_seconds",
-            "thumbnail_url", "summary", "summary_error_code", "category", "interest_score",
-            "user_interest", "consumed", "viewed", "engagement",
+            "thumbnail_url", "summary", "summary_error_code", "category", "subcategory",
+            "interest_score", "user_interest", "consumed", "viewed", "engagement",
         ]
     }
     common_aggs = {
@@ -126,6 +139,7 @@ async def list_content(
         "consumed": {"terms": {"field": "consumed", "missing": False}},
         "interest": {"terms": {"field": "user_interest", "size": 10}},
         "category": {"terms": {"field": "category", "size": 20}},
+        "subcategory": {"terms": {"field": "subcategory", "size": 50}},
         "corridor": {"filter": {"prefix": {"external_id": CORRIDOR_PREFIX}}},
     }
 
@@ -244,7 +258,7 @@ class PredictionResponse(BaseModel):
 
 
 @router.get("/predictions/", response_model=PredictionResponse)
-async def predictions(limit: int | None = Query(default=None, le=500)):
+async def predictions(limit: int | None = Query(default=None, le=500), demo: DemoMode = False):
     """ML-ranked watchlist split.
 
     Top section: every unwatched video predicted interesting (P(engaged) > 50%,
@@ -266,7 +280,7 @@ async def predictions(limit: int | None = Query(default=None, le=500)):
             "minimum_should_match": 1,
         }
     }
-    base_filter = [{"term": {"type": "video"}}, unwatched]
+    base_filter = [{"term": {"type": "video"}}, unwatched, *await demo_filters(demo)]
 
     resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
@@ -419,7 +433,7 @@ def _verdict(interest_pct: float | None, engagement_pct: float | None) -> str:
 
 
 @router.get("/quarantine-stats/", response_model=QuarantineStatsResponse)
-async def quarantine_stats():
+async def quarantine_stats(demo: DemoMode = False):
     """Analytics over the quarantine history: how much is getting pulled, why,
     from where, and whether our own interest/engagement models liked it right
     before an external judge rejected it. Percentiles are computed against the
@@ -427,6 +441,7 @@ async def quarantine_stats():
     normal timeline item," not just "high relative to other junk."
     """
     es = get_es_client()
+    demo_scope = await demo_filters(demo)
 
     async def _events() -> list[dict[str, Any]]:
         resp = await es.search(
@@ -445,7 +460,10 @@ async def quarantine_stats():
         resp = await es.search(
             index=CONTENT_ITEMS_INDEX,
             body={
-                "query": {"bool": {"must_not": {"exists": {"field": "quarantined_at"}}}},
+                "query": {"bool": {
+                    "must_not": {"exists": {"field": "quarantined_at"}},
+                    "filter": demo_scope,
+                }},
                 "size": 10000,
                 "_source": ["interest_score", "engagement.score"],
             },
@@ -463,7 +481,7 @@ async def quarantine_stats():
         resp = await es.search(
             index=CONTENT_ITEMS_INDEX,
             body={
-                "query": {"match_all": {}},
+                "query": {"bool": {"filter": demo_scope}},
                 "size": 0,
                 "aggs": {"by_sub": {"terms": {"field": "subscription_id", "size": 500}}},
             },
@@ -497,6 +515,9 @@ async def quarantine_stats():
     if item_ids:
         mget_resp = await es.mget(index=CONTENT_ITEMS_INDEX, body={"ids": item_ids})
         content_by_id = {doc["_id"]: doc["_source"] for doc in mget_resp.get("docs", []) if doc.get("found")}
+    if demo:
+        content_by_id = {k: v for k, v in content_by_id.items() if await in_demo_scope(demo, v)}
+        raw_events = [e for e in raw_events if e.get("content_item_id") in content_by_id]
 
     (interest_pop, engagement_pop), total_items_by_sub = await asyncio.gather(population_task, totals_task)
     interest_percentile = _percentile_lookup(interest_pop)
@@ -596,11 +617,13 @@ async def quarantine_stats():
 
 
 @router.get("/{item_id}/", response_model=ContentItem)
-async def get_content_item(item_id: str):
+async def get_content_item(item_id: str, demo: DemoMode = False):
     es = get_es_client()
     try:
         resp = await es.get(index=CONTENT_ITEMS_INDEX, id=item_id)
     except Exception:
+        raise HTTPException(status_code=404, detail="Content item not found")
+    if not await in_demo_scope(demo, resp["_source"]):
         raise HTTPException(status_code=404, detail="Content item not found")
     return ContentItem(id=resp["_id"], **resp["_source"])
 

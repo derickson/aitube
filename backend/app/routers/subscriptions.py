@@ -10,6 +10,7 @@ from backend.app.models.subscription import (
     SubscriptionCreate,
     SubscriptionUpdate,
 )
+from backend.app.services.demo_mode import DemoMode, demo_filters
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     SUBSCRIPTIONS_INDEX,
@@ -72,8 +73,9 @@ class SubscriptionWithCount(Subscription):
 
 
 @router.get("/", response_model=list[SubscriptionWithCount])
-async def list_subscriptions():
+async def list_subscriptions(demo: DemoMode = False):
     es = get_es_client()
+    demo_scope = await demo_filters(demo)
 
     # Fetch subscriptions and content counts in parallel
     sub_resp, count_resp = await asyncio.gather(
@@ -85,6 +87,7 @@ async def list_subscriptions():
             index=CONTENT_ITEMS_INDEX,
             body={
                 "size": 0,
+                "query": {"bool": {"filter": demo_scope}},
                 "aggs": {"per_sub": {"terms": {"field": "subscription_id", "size": 10000}}},
             },
         ),
@@ -97,6 +100,9 @@ async def list_subscriptions():
 
     results = []
     for hit in sub_resp["hits"]["hits"]:
+        # In Demo Mode, a source with nothing in the demo category isn't shown at all.
+        if demo and not count_map.get(hit["_id"]):
+            continue
         sub = SubscriptionWithCount(
             id=hit["_id"],
             **hit["_source"],
