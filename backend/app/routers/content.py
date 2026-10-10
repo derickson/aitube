@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from backend.app.config import settings
 from backend.app.models.content import ContentItem, ContentItemSummary
 from backend.app.services import content_cache
+from backend.app.services.corridor import EXTERNAL_ID_PREFIX as CORRIDOR_PREFIX
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -60,7 +61,14 @@ async def list_content(
 
     if subscription_id:
         filter_clauses.append({"term": {"subscription_id": subscription_id}})
-    if content_type:
+    if content_type == "corridor":
+        # Virtual type: Corridor items are indexed as type "video" (see corridor.py)
+        filter_clauses.append({"prefix": {"external_id": CORRIDOR_PREFIX}})
+    elif content_type == "video":
+        # "video" in the UI means YouTube, so exclude the Corridor items sharing the type
+        filter_clauses.append({"term": {"type": "video"}})
+        filter_clauses.append({"bool": {"must_not": {"prefix": {"external_id": CORRIDOR_PREFIX}}}})
+    elif content_type:
         filter_clauses.append({"term": {"type": content_type}})
     if consumed == "true":
         filter_clauses.append({"term": {"consumed": True}})
@@ -118,6 +126,7 @@ async def list_content(
         "consumed": {"terms": {"field": "consumed", "missing": False}},
         "interest": {"terms": {"field": "user_interest", "size": 10}},
         "category": {"terms": {"field": "category", "size": 20}},
+        "corridor": {"filter": {"prefix": {"external_id": CORRIDOR_PREFIX}}},
     }
 
     search_body: dict[str, Any]
@@ -189,6 +198,8 @@ async def list_content(
     # Build facets from filtered aggregations
     facets: dict[str, list[FacetBucket]] = {}
     for agg_name, agg_data in search_resp.get("aggregations", {}).items():
+        if agg_name == "corridor":
+            continue
         if agg_name == "consumed":
             watched = 0
             unwatched = 0
@@ -207,6 +218,17 @@ async def list_content(
                 FacetBucket(key=bucket["key"], count=bucket["doc_count"])
                 for bucket in agg_data.get("buckets", [])
             ]
+
+    # Split Corridor out of the "video" type bucket into its own "corridor" type
+    corridor_count = search_resp.get("aggregations", {}).get("corridor", {}).get("doc_count", 0)
+    if corridor_count:
+        type_buckets = facets.get("type", [])
+        for b in type_buckets:
+            if b.key == "video":
+                b.count -= corridor_count
+        facets["type"] = [b for b in type_buckets if b.count > 0 or b.key != "video"] + [
+            FacetBucket(key="corridor", count=corridor_count)
+        ]
 
     response = ContentSearchResponse(items=items, total=total, facets=facets)
     content_cache.put(cache_params, response)

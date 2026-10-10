@@ -8,7 +8,7 @@ import {
   setConsumed as apiSetConsumed,
   getCategorySettings,
   CATEGORY_LABELS,
-  type ContentType,
+  type DisplayType,
   type ContentSearchResponse,
   type FacetBucket,
   type Subscription,
@@ -91,8 +91,8 @@ export function Timeline() {
   // Server-side filters — initial values are read once from the URL so a
   // refresh or a pasted link restores the exact same view.
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
-  const [typeFilter, setTypeFilter] = useState<ContentType | "">(
-    () => (searchParams.get("type") as ContentType | null) ?? "",
+  const [typeFilter, setTypeFilter] = useState<DisplayType | "">(
+    () => (searchParams.get("type") as DisplayType | null) ?? "",
   );
   const [interestFilter, setInterestFilter] = useState<"up" | "down" | "none" | "">(
     () => (searchParams.get("interest") as "up" | "down" | "none" | null) ?? "",
@@ -143,7 +143,7 @@ export function Timeline() {
       const [contentData, subData] = await Promise.all([
         searchContent({
           q: debouncedSearch || undefined,
-          content_type: (typeFilter || undefined) as ContentType | undefined,
+          content_type: (typeFilter || undefined) as DisplayType | undefined,
           subscription_id: subFilter || undefined,
           consumed: (consumedFilter || undefined) as "true" | "false" | undefined,
           interest: (interestFilter || undefined) as "up" | "down" | "none" | undefined,
@@ -282,10 +282,10 @@ export function Timeline() {
             >
               <span>All</span><span className="facet-count">{total}</span>
             </button>
-            {(["video", "podcast_episode", "article"] as ContentType[]).map((t) => (
+            {(["video", "corridor", "podcast_episode", "article"] as DisplayType[]).map((t) => (
               <button
                 key={t}
-                className={`facet-item facet-type-${t === "video" ? "youtube_channel" : t === "podcast_episode" ? "podcast" : "rss"}${typeFilter === t ? " active" : ""}`}
+                className={`facet-item facet-type-${t === "video" ? "youtube_channel" : t === "corridor" ? "corridor_show" : t === "podcast_episode" ? "podcast" : "rss"}${typeFilter === t ? " active" : ""}`}
                 onClick={() => { setTypeFilter(typeFilter === t ? "" : t); closeSidebar(); }}
               >
                 <span>{TYPE_LABELS[t]}</span><span className="facet-count">{facetCount(typeBuckets, t)}</span>

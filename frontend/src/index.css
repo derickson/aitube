@@ -1204,6 +1204,7 @@ main:has(.flyout-open) {
 }
 
 .facet-type-youtube_channel.active { background: var(--youtube); }
+.facet-type-corridor_show.active { background: var(--corridor); color: var(--corridor-ink); }
 .facet-type-podcast.active { background: var(--podcast); }
 .facet-type-rss.active { background: var(--rss); }
 .facet-interest-up.active { background: var(--success); }
@@ -1256,6 +1257,7 @@ main:has(.flyout-open) {
 }
 
 .content-card-type-video { border-top: 3px solid var(--youtube); }
+.content-card-type-corridor { border-top: 3px solid var(--corridor); }
 .content-card-type-podcast_episode { border-top: 3px solid var(--podcast); }
 .content-card-type-article { border-top: 3px solid var(--rss); }
 
@@ -1327,6 +1329,7 @@ main:has(.flyout-open) {
 }
 
 .content-type-video { background: var(--youtube); }
+.content-type-corridor { background: var(--corridor); color: var(--corridor-ink); }
 .content-type-podcast_episode { background: var(--podcast); }
 .content-type-article { background: var(--rss); }
 

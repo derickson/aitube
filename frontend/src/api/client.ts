@@ -19,6 +19,8 @@ export async function apiFetch<T>(
 export type SubscriptionType = "youtube_channel" | "podcast" | "rss" | "corridor_show";
 export type SubscriptionStatus = "active" | "muted" | "unfollowed";
 export type ContentType = "video" | "podcast_episode" | "article";
+/** ContentType plus the virtual "corridor" filter (Corridor items are indexed as "video"). */
+export type DisplayType = ContentType | "corridor";
 
 export interface Subscription {
   id: string;
@@ -55,6 +57,11 @@ export interface Engagement {
  *  to corridordigital.com instead of playing in AI Tube. */
 export function isCorridorItem(item: { external_id?: string }): boolean {
   return item.external_id?.startsWith("corridor_") ?? false;
+}
+
+/** Type used for badges/colors: Corridor items share `video` with YouTube but display separately. */
+export function displayType(item: { type: ContentType; external_id?: string }): DisplayType {
+  return isCorridorItem(item) ? "corridor" : item.type;
 }
 
 export interface ContentItemSummary {
@@ -180,7 +187,7 @@ export interface ContentSearchResponse {
 
 export function searchContent(params?: {
   subscription_id?: string;
-  content_type?: ContentType;
+  content_type?: DisplayType;
   consumed?: "true" | "false";
   interest?: "up" | "down" | "none";
   category_include?: string;

@@ -1,11 +1,13 @@
+import { displayType } from "../api/client";
 import type {
   ContentItemSummary,
-  ContentType,
+  DisplayType,
   PlaybackProgress,
 } from "../api/client";
 
-export const TYPE_LABELS: Record<ContentType, string> = {
+export const TYPE_LABELS: Record<DisplayType, string> = {
   video: "YouTube",
+  corridor: "Corridor",
   podcast_episode: "Podcast",
   article: "Article",
 };
@@ -57,7 +59,7 @@ export function ContentCard({
 
   const classes = [
     "content-card",
-    `content-card-type-${item.type}`,
+    `content-card-type-${displayType(item)}`,
     isActive && "content-card-active",
     isConsumed && "content-card-consumed",
     item.user_interest === "down" && "content-card-downvoted",
@@ -104,8 +106,8 @@ export function ContentCard({
       )}
       <div className="content-body">
         <div className="content-top-row">
-          <span className={`content-type-badge content-type-${item.type}`}>
-            {TYPE_LABELS[item.type]}
+          <span className={`content-type-badge content-type-${displayType(item)}`}>
+            {TYPE_LABELS[displayType(item)]}
           </span>
           {showActions && (
             <span className="content-interest-btns">
