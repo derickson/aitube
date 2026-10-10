@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.app.services import content_cache, content_dlp
+from backend.app.services import content_cache, content_dlp, corridor
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     content_index_pipeline,
@@ -51,6 +51,7 @@ class ContentPreview(BaseModel):
     preview_id: str
     url: str
     detected_type: str  # "video", "podcast_episode", "article"
+    platform: str | None = None  # "corridor" for videos that play on corridordigital.com
     title: str | None = None
     thumbnail_url: str | None = None
     duration_seconds: float | None = None
@@ -85,9 +86,24 @@ def _cleanup_cache() -> None:
         del _preview_cache[oldest]
 
 
+def _corridor_video_id(url: str) -> int | None:
+    """Media id for a Corridor video URL. A Corridor *show* URL is rejected,
+    since a show belongs in Subscriptions rather than as a single item."""
+    ref = corridor.parse_url(url)
+    if not ref:
+        return None
+    kind, item_id = ref
+    if kind == "season":
+        raise HTTPException(
+            status_code=400,
+            detail="That's a Corridor show. Add it under Subscriptions to follow new episodes.",
+        )
+    return item_id
+
+
 def _detect_type(url: str) -> str:
     """Detect content type from URL. Returns 'video', 'podcast_episode', or 'article'."""
-    if _YT_VIDEO_ID_RE.search(url):
+    if _YT_VIDEO_ID_RE.search(url) or _corridor_video_id(url) is not None:
         return "video"
     path = urlparse(url).path.lower()
     ext = "." + path.rsplit(".", 1)[-1] if "." in path.rsplit("/", 1)[-1] else ""
@@ -141,7 +157,7 @@ def _md5_hash(s: str) -> str:
 
 async def _classify(title: str, description: str, summary: str) -> str | None:
     """Best-effort Jev categorization; never raises. `process_youtube_video_doc`
-    handles this itself for ad-hoc videos, so this only covers podcast/article."""
+    handles this itself for ad-hoc YouTube videos, so this covers everything else."""
     from backend.app.services.content_classifier import classify_content
 
     try:
@@ -152,6 +168,30 @@ async def _classify(title: str, description: str, summary: str) -> str | None:
     except Exception as e:
         logger.warning("Failed to categorize '%s': %s", title[:60], e)
         return None
+
+
+async def _ensure_not_in_library(url: str, detected_type: str) -> None:
+    """Raise 409 if this URL's content is already indexed."""
+    es = get_es_client()
+    corridor_id = _corridor_video_id(url)
+    vid_match = _YT_VIDEO_ID_RE.search(url) if detected_type == "video" else None
+    if corridor_id is not None or vid_match:
+        external_id = (
+            corridor.external_id(corridor_id) if corridor_id is not None else f"yt_{vid_match.group(1)}"
+        )
+        resp = await es.search(
+            index=CONTENT_ITEMS_INDEX,
+            body={"query": {"term": {"external_id": external_id}}, "_source": False, "size": 1},
+        )
+        if resp["hits"]["hits"]:
+            raise HTTPException(status_code=409, detail="This video already exists in your library")
+    elif detected_type != "video":
+        resp = await es.search(
+            index=CONTENT_ITEMS_INDEX,
+            body={"query": {"term": {"url": url}}, "_source": False, "size": 1},
+        )
+        if resp["hits"]["hits"]:
+            raise HTTPException(status_code=409, detail="This content already exists in your library")
 
 
 # --- Endpoints ---
@@ -173,7 +213,10 @@ async def preview_content(request: PreviewRequest):
         "detected_type": detected_type,
     }
 
-    if detected_type == "video":
+    corridor_id = _corridor_video_id(url)
+    if corridor_id is not None:
+        preview = await _preview_corridor(url, corridor_id, preview_id, preview_data)
+    elif detected_type == "video":
         preview = await _preview_youtube(url, preview_id)
     elif detected_type == "podcast_episode":
         preview = await _preview_podcast(url, preview_id)
@@ -183,6 +226,29 @@ async def preview_content(request: PreviewRequest):
     preview_data["preview"] = preview.model_dump()
     _preview_cache[preview_id] = preview_data
     return preview
+
+
+async def _preview_corridor(
+    url: str, media_id: int, preview_id: str, preview_data: dict
+) -> ContentPreview:
+    try:
+        item = await corridor.fetch_video_item(media_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch Corridor metadata: {e}")
+    preview_data["corridor_item"] = item
+
+    return ContentPreview(
+        preview_id=preview_id,
+        url=item["url"],
+        detected_type="video",
+        platform="corridor",
+        title=item["title"],
+        thumbnail_url=item["thumbnail_url"] or None,
+        duration_seconds=item["duration_seconds"],
+        published_at=item["published_date"],
+        description=item["description"][:500] or None,
+        author=item["extras"]["show_name"],
+    )
 
 
 async def _preview_youtube(url: str, preview_id: str) -> ContentPreview:
@@ -283,25 +349,7 @@ async def confirm_content(request: ConfirmRequest):
     url = cached["url"]
     detected_type = cached["detected_type"]
 
-    # Dedup check
-    es = get_es_client()
-    if detected_type == "video":
-        vid_match = _YT_VIDEO_ID_RE.search(url)
-        if vid_match:
-            external_id = f"yt_{vid_match.group(1)}"
-            resp = await es.search(
-                index=CONTENT_ITEMS_INDEX,
-                body={"query": {"term": {"external_id": external_id}}, "_source": False, "size": 1},
-            )
-            if resp["hits"]["hits"]:
-                raise HTTPException(status_code=409, detail="This video already exists in your library")
-    else:
-        resp = await es.search(
-            index=CONTENT_ITEMS_INDEX,
-            body={"query": {"term": {"url": url}}, "_source": False, "size": 1},
-        )
-        if resp["hits"]["hits"]:
-            raise HTTPException(status_code=409, detail="This content already exists in your library")
+    await _ensure_not_in_library(url, detected_type)
 
     # Remove from cache
     del _preview_cache[request.preview_id]
@@ -325,25 +373,7 @@ async def ingest_content(request: IngestRequest):
 
     detected_type = await _detect_type_with_head(url)
 
-    # Dedup check
-    es = get_es_client()
-    if detected_type == "video":
-        vid_match = _YT_VIDEO_ID_RE.search(url)
-        if vid_match:
-            external_id = f"yt_{vid_match.group(1)}"
-            resp = await es.search(
-                index=CONTENT_ITEMS_INDEX,
-                body={"query": {"term": {"external_id": external_id}}, "_source": False, "size": 1},
-            )
-            if resp["hits"]["hits"]:
-                raise HTTPException(status_code=409, detail="This video already exists in your library")
-    else:
-        resp = await es.search(
-            index=CONTENT_ITEMS_INDEX,
-            body={"query": {"term": {"url": url}}, "_source": False, "size": 1},
-        )
-        if resp["hits"]["hits"]:
-            raise HTTPException(status_code=409, detail="This content already exists in your library")
+    await _ensure_not_in_library(url, detected_type)
 
     # Fire background task with empty cached data (no preview step)
     task = asyncio.create_task(
@@ -364,7 +394,10 @@ async def _process_content(
 ) -> None:
     """Background task: process submitted content through the appropriate pipeline."""
     try:
-        if detected_type == "video":
+        corridor_id = _corridor_video_id(url)
+        if corridor_id is not None:
+            await _process_corridor(corridor_id, title_override, cached, submission_source)
+        elif detected_type == "video":
             await _process_video(url, title_override, submission_source)
         elif detected_type == "podcast_episode":
             await _process_podcast(url, title_override, submission_source)
@@ -405,6 +438,53 @@ async def _process_video(url: str, title_override: str | None, submission_source
     )
     content_cache.invalidate()
     logger.info("Indexed ad-hoc video '%s' as %s", enriched.get("title", url), doc_id)
+
+
+async def _process_corridor(
+    media_id: int, title_override: str | None, cached: dict, submission_source: str
+) -> None:
+    """Index a Corridor video from metadata only — no download, transcript, or
+    summary. It plays on corridordigital.com, which needs the user's login."""
+    item = cached.get("corridor_item") or await corridor.fetch_video_item(media_id)
+    title = title_override or item["title"] or "Untitled Corridor Video"
+    description = item["description"]
+    extras = item["extras"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    doc = {
+        "subscription_id": "adhoc",
+        "submission_source": submission_source,
+        "external_id": item["content_id"],
+        "type": "video",
+        "title": title,
+        "url": item["url"],
+        "channel_name": extras["show_name"],
+        "published_at": item["published_date"] or now,
+        "discovered_at": now,
+        "duration_seconds": item["duration_seconds"],
+        "thumbnail_url": item["thumbnail_url"],
+        "summary": "",
+        "category": await _classify(title, description, ""),
+        "interest_score": None,
+        "interest_reasoning": "",
+        "transcript": None,
+        "content_markdown": "",
+        "content_dlp_cache_id": "",
+        "metadata": {
+            "description": description,
+            "author": item["author"],
+            "tags": [],
+            "extras": extras,
+        },
+    }
+
+    es = get_es_client()
+    doc_id = str(uuid.uuid4())
+    await es.index(
+        index=CONTENT_ITEMS_INDEX, id=doc_id, document=doc, **content_index_pipeline()
+    )
+    content_cache.invalidate()
+    logger.info("Indexed ad-hoc Corridor video '%s' as %s", title, doc_id)
 
 
 async def _process_podcast(url: str, title_override: str | None, submission_source: str) -> None:

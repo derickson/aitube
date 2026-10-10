@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from backend.app.services import content_dlp
+from backend.app.services import content_dlp, corridor
 from backend.app.services.feed_text import clean_feed_text
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ SPOTIFY_SHOW_PATTERN = r"open\.spotify\.com/show/[\w]+"
 class ResolvedFeed:
     url: str
     feed_url: str
-    type: str  # youtube_channel, podcast, rss
+    type: str  # youtube_channel, podcast, rss, corridor_show
     name: str
     description: str = ""
     thumbnail_url: str = ""
@@ -336,11 +336,42 @@ async def _resolve_youtube_channel(url: str) -> ResolvedFeed:
         )
 
 
+async def _resolve_corridor(url: str, kind: str, item_id: int) -> ResolvedFeed:
+    """Resolve a Corridor show or video URL to its show. A video URL subscribes
+    to the video's primary show (its metadata `seasonId`)."""
+    if kind == "video":
+        meta = await corridor.fetch_metadata(item_id)
+        season_id = str(meta.get("seasonId") or "")
+        if not season_id.isdigit():
+            raise ValueError(f"Corridor video {item_id} has no show to subscribe to")
+        item_id = int(season_id)
+
+    season = await corridor.fetch_season(item_id)
+    items = corridor.season_items(season)
+    latest = items[0] if items else {}
+    return ResolvedFeed(
+        url=url,
+        feed_url=corridor.season_url(item_id),
+        type="corridor_show",
+        name=season.get("name") or f"Corridor show {item_id}",
+        description=f"Corridor Digital show · {len(items)} episodes",
+        thumbnail_url=latest.get("thumbnail_url", ""),
+        sample_items=[
+            {"title": i["title"], "published": i["published_date"]} for i in items[:3]
+        ],
+    )
+
+
 async def resolve_url(url: str) -> ResolvedFeed:
     """
     Take a raw URL and return a ResolvedFeed with metadata, feed URL, and type.
     """
     url = url.strip()
+
+    # --- Corridor Digital ---
+    corridor_ref = corridor.parse_url(url)
+    if corridor_ref:
+        return await _resolve_corridor(url, *corridor_ref)
 
     # --- Apple Podcasts ---
     apple_id = _apple_podcast_id(url)

@@ -17,6 +17,7 @@ const TYPE_LABELS: Record<SubscriptionType, string> = {
   youtube_channel: "YouTube",
   podcast: "Podcast",
   rss: "RSS",
+  corridor_show: "Corridor",
 };
 
 const TYPE_FILTERS: { value: SubscriptionType | "all"; label: string }[] = [
@@ -24,6 +25,7 @@ const TYPE_FILTERS: { value: SubscriptionType | "all"; label: string }[] = [
   { value: "youtube_channel", label: "YouTube" },
   { value: "podcast", label: "Podcasts" },
   { value: "rss", label: "RSS" },
+  { value: "corridor_show", label: "Corridor" },
 ];
 
 const STATUS_FILTERS: { value: SubscriptionStatus | "all"; label: string }[] = [
@@ -99,7 +101,7 @@ export function SubscriptionManager() {
   }, [subs, typeFilter, statusFilter, search]);
 
   const counts = useMemo(() => {
-    const c = { all: subs.length, youtube_channel: 0, podcast: 0, rss: 0 };
+    const c = { all: subs.length, youtube_channel: 0, podcast: 0, rss: 0, corridor_show: 0 };
     for (const s of subs) c[s.type]++;
     return c;
   }, [subs]);

@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from backend.app.models.subscription import Subscription, SubscriptionType
-from backend.app.services import content_cache, content_dlp
+from backend.app.services import content_cache, content_dlp, corridor
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -76,6 +76,7 @@ SUB_TYPE_TO_CONTENT_TYPE = {
     SubscriptionType.youtube_channel: "video",
     SubscriptionType.podcast: "podcast_episode",
     SubscriptionType.rss: "article",
+    SubscriptionType.corridor_show: "video",
 }
 
 
@@ -554,6 +555,9 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             from backend.app.config import settings
             items_raw = await _fetch_rss_feed(subscription.url)
             items_raw = _filter_by_age(items_raw, settings.rss_max_age_days)
+        elif subscription.type == SubscriptionType.corridor_show:
+            # Metadata only: playback needs a Corridor login, so items link out
+            items_raw = await corridor.fetch_show_items(subscription.url)
         else:
             logger.warning("Unknown subscription type: %s", subscription.type)
             return []
@@ -651,7 +655,9 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
             except Exception as e:
                 logger.warning("Failed to transcribe podcast %s: %s", doc["title"], e)
 
-        # Generate AI summary for non-YouTube types (YouTube handled by process_youtube_video_doc)
+        # Generate AI summary for non-YouTube types (YouTube handled by process_youtube_video_doc).
+        # Corridor items have only a teaser description, so they skip summarization
+        # (it would just restate the teaser) and go straight to categorization.
         if subscription.type != SubscriptionType.youtube_channel:
             transcript_obj = doc.get("transcript")
             transcript_text = ""
@@ -661,7 +667,9 @@ async def poll_subscription(subscription: Subscription) -> list[str]:
                 if transcript_obj.get("chunks"):
                     transcript_chunks = transcript_obj["chunks"]
             source_text = transcript_text or doc.get("content_markdown", "")
-            if source_text or doc.get("metadata", {}).get("description"):
+            if subscription.type != SubscriptionType.corridor_show and (
+                source_text or doc.get("metadata", {}).get("description")
+            ):
                 try:
                     from backend.app.services.summarizer import summarize_content
                     summary, summary_error, summary_error_code = await summarize_content(
@@ -866,6 +874,8 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
                         {"terms": {"type": ["video", "podcast_episode"]}},
                     ],
                     "must_not": [
+                        # Corridor videos are DRM'd and play off-site; never transcribe them
+                        {"prefix": {"external_id": corridor.EXTERNAL_ID_PREFIX}},
                         {"range": {"transcript_attempts": {"gte": MAX_TRANSCRIPT_ATTEMPTS}}},
                         {"range": {"transcript_last_attempted_at": {"gt": cooldown_cutoff}}},
                     ],

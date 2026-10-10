@@ -122,7 +122,7 @@ export function AddContent({ embedded = false, onCancel }: AddContentProps = {})
             <form className="resolve-row" onSubmit={handlePreview}>
               <input
                 type="text"
-                placeholder="Paste a YouTube URL, podcast MP3 link, or article URL..."
+                placeholder="Paste a YouTube or Corridor video URL, podcast MP3 link, or article URL..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 autoFocus
@@ -156,9 +156,13 @@ export function AddContent({ embedded = false, onCancel }: AddContentProps = {})
                     />
                   )}
                   <div className="preview-info">
-                    <span className={`sub-type-badge ${TYPE_BADGE_CLASS[preview.detected_type]}`}>
-                      {TYPE_LABELS[preview.detected_type]}
-                    </span>
+                    {preview.platform === "corridor" ? (
+                      <span className="sub-type-badge sub-type-corridor_show">Corridor</span>
+                    ) : (
+                      <span className={`sub-type-badge ${TYPE_BADGE_CLASS[preview.detected_type]}`}>
+                        {TYPE_LABELS[preview.detected_type]}
+                      </span>
+                    )}
                     <input
                       className="preview-name-input"
                       type="text"
@@ -198,6 +202,12 @@ export function AddContent({ embedded = false, onCancel }: AddContentProps = {})
                     </div>
                   </div>
                 </div>
+
+                {preview.platform === "corridor" && (
+                  <div className="preview-note">
+                    Corridor videos play on corridordigital.com — AI Tube stores the details and links out.
+                  </div>
+                )}
 
                 {preview.detected_type === "podcast_episode" && !titleOverride && (
                   <div className="preview-note">

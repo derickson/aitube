@@ -20,6 +20,9 @@
   --rss: #f57c00;
   --rss-light: #fff3e0;
   --rss-border: #ffcc80;
+  --corridor: #f2e300;
+  --corridor-ink: #141300;
+  --corridor-light: #fdfbd8;
   --logo-ai: #e88c30;
 }
 
@@ -45,6 +48,9 @@
   --rss: #ffa726;
   --rss-light: #2a1f0f;
   --rss-border: #6e4b1e;
+  --corridor: #f2e300;
+  --corridor-ink: #141300;
+  --corridor-light: #232206;
   --logo-ai: #f5a623;
 }
 
@@ -661,11 +667,13 @@ main:has(.flyout-open) {
 .sub-type-youtube_channel { background: var(--youtube); }
 .sub-type-podcast { background: var(--podcast); }
 .sub-type-rss { background: var(--rss); }
+.sub-type-corridor_show { background: var(--corridor); color: var(--corridor-ink); }
 
 /* Per-type card accent */
 .sub-card-type-youtube_channel { border-left: 3px solid var(--youtube); background: var(--youtube-light); }
 .sub-card-type-podcast { border-left: 3px solid var(--podcast); background: var(--podcast-light); }
 .sub-card-type-rss { border-left: 3px solid var(--rss); background: var(--rss-light); }
+.sub-card-type-corridor_show { border-left: 3px solid var(--corridor); background: var(--corridor-light); }
 
 .sub-name {
   font-size: 1.05rem;
@@ -827,6 +835,12 @@ main:has(.flyout-open) {
 .filter-pill-type-rss.active {
   background: var(--rss);
   border-color: var(--rss);
+}
+
+.filter-pill-type-corridor_show.active {
+  background: var(--corridor);
+  border-color: var(--corridor);
+  color: var(--corridor-ink);
 }
 
 .filter-count {
@@ -1968,6 +1982,43 @@ main:has(.flyout-open) {
   left: 0;
   width: 100%;
   height: 100%;
+}
+
+/* Corridor Digital — links out instead of playing in place */
+
+.corridor-link {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.corridor-link img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.corridor-link:hover img {
+  opacity: 0.4;
+}
+
+.corridor-link-cta {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0.6rem 1.2rem;
+  border-radius: 6px;
+  background: var(--corridor);
+  color: var(--corridor-ink);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 /* Audio Player */

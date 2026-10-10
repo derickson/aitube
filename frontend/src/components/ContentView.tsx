@@ -8,6 +8,7 @@ import {
   updatePlayback,
   setConsumed as apiSetConsumed,
   setViewed as apiSetViewed,
+  isCorridorItem,
   type ContentItem,
   type PlaybackState,
 } from "../api/client";
@@ -231,7 +232,17 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
           </div>
         )}
 
-        {item.type === "video" && (
+        {isCorridorItem(item) ? (
+          <CorridorLink
+            item={item}
+            onConsumed={() => {
+              if (consumed) return;
+              setConsumed(true);
+              onConsumedChange?.(itemId, true);
+              apiSetConsumed(itemId, true).catch(() => {});
+            }}
+          />
+        ) : item.type === "video" && (
           <YouTubePlayer
             item={item}
             initialPosition={playback?.position_seconds ?? 0}
@@ -343,6 +354,23 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
         </ContentTabs>
       </div>
     </aside>
+  );
+}
+
+// --- Corridor Digital (plays off-site) ---
+
+function CorridorLink({ item, onConsumed }: { item: ContentItem; onConsumed: () => void }) {
+  return (
+    <a
+      className="corridor-link"
+      href={item.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={onConsumed}
+    >
+      {item.thumbnail_url && <img src={item.thumbnail_url} alt="" />}
+      <span className="corridor-link-cta">Watch on Corridor ↗</span>
+    </a>
   );
 }
 

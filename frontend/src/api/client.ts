@@ -16,7 +16,7 @@ export async function apiFetch<T>(
 
 // --- Types ---
 
-export type SubscriptionType = "youtube_channel" | "podcast" | "rss";
+export type SubscriptionType = "youtube_channel" | "podcast" | "rss" | "corridor_show";
 export type SubscriptionStatus = "active" | "muted" | "unfollowed";
 export type ContentType = "video" | "podcast_episode" | "article";
 
@@ -49,6 +49,12 @@ export interface Engagement {
   score: number | null; // P(engaged), 0..1
   prediction_probability: number | null;
   model_id: string | null;
+}
+
+/** Corridor Digital videos are DRM'd and need the user's login, so they link out
+ *  to corridordigital.com instead of playing in AI Tube. */
+export function isCorridorItem(item: { external_id?: string }): boolean {
+  return item.external_id?.startsWith("corridor_") ?? false;
 }
 
 export interface ContentItemSummary {
@@ -290,6 +296,7 @@ export interface ContentPreviewResponse {
   preview_id: string;
   url: string;
   detected_type: ContentType;
+  platform: "corridor" | null;
   title: string | null;
   thumbnail_url: string | null;
   duration_seconds: number | null;

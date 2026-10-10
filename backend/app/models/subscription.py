@@ -9,6 +9,7 @@ class SubscriptionType(str, Enum):
     youtube_channel = "youtube_channel"
     podcast = "podcast"
     rss = "rss"
+    corridor_show = "corridor_show"
 
 
 class SubscriptionStatus(str, Enum):
