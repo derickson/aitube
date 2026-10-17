@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 
 import { Timeline } from "./components/Timeline";
 import { Search } from "./components/Search";
+import { SearchExplain } from "./components/SearchExplain";
 import { TopicFlow } from "./components/TopicFlow";
 import { EmbeddingsView } from "./components/EmbeddingsView";
 import { Prediction } from "./components/Prediction";
@@ -20,7 +21,7 @@ import type { Theme } from "./theme/theme";
 
 function AppContent() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
-  const { demoMode } = useDemoMode();
+  const { demoMode, zenMode } = useDemoMode();
 
   useEffect(() => {
     applyTheme(theme);
@@ -43,6 +44,11 @@ function AppContent() {
             Demo
           </span>
         )}
+        {zenMode && (
+          <span className="demo-badge" title="Zen Mode: AI and Software content hidden">
+            Zen
+          </span>
+        )}
         <nav>
           <NavLink to="/">Timeline</NavLink>
           <NavLink to="/search/">Search</NavLink>
@@ -54,11 +60,12 @@ function AppContent() {
         <SettingsMenu />
       </header>
       <main>
-        {/* Keyed on Demo Mode so flipping it remounts the current page, which
+        {/* Keyed on Demo/Zen Mode so flipping them remounts the current page, which
             refetches everything under the new scope. */}
-        <Routes key={demoMode ? "demo" : "full"}>
+        <Routes key={demoMode ? "demo" : zenMode ? "zen" : "full"}>
           <Route path="/" element={<Timeline />} />
           <Route path="/search/" element={<Search />} />
+          <Route path="/search-explain/" element={<SearchExplain />} />
           <Route path="/topic-flow/" element={<TopicFlow />} />
           <Route path="/embeddings/" element={<EmbeddingsView />} />
           <Route path="/prediction/" element={<Prediction />} />

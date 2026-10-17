@@ -2,10 +2,16 @@ const BASE = "/aitube/api";
 
 // Demo Mode (see demo/DemoMode.tsx) is sent on every request so the backend can
 // restrict all content to the demo category — backend/app/services/demo_mode.py.
+// Zen Mode is the inverse (hides that category); the two are mutually exclusive.
 let demoMode = false;
+let zenMode = false;
 
 export function setApiDemoMode(on: boolean): void {
   demoMode = on;
+}
+
+export function setApiZenMode(on: boolean): void {
+  zenMode = on;
 }
 
 export async function apiFetch<T>(
@@ -17,6 +23,7 @@ export async function apiFetch<T>(
     headers: {
       "Content-Type": "application/json",
       ...(demoMode ? { "X-Demo-Mode": "1" } : {}),
+      ...(zenMode ? { "X-Zen-Mode": "1" } : {}),
       ...options?.headers,
     },
   });
@@ -227,6 +234,47 @@ export function searchContent(params?: {
   if (params?.offset !== undefined) search.set("offset", String(params.offset));
   const qs = search.toString();
   return apiFetch(`/content/${qs ? `?${qs}` : ""}`);
+}
+
+// --- Search explain ---
+
+export interface ExplainTerm { term: string; score: number }
+export interface ExplainField {
+  field: string;
+  boost: number;
+  score: number;
+  counted: boolean;
+  terms: ExplainTerm[];
+}
+export interface ExplainRetriever {
+  name: string;
+  label: string;
+  rank: number | null;
+  score: number | null;
+  rrf_contribution: number;
+  fields: ExplainField[];
+  snippets: string[];
+}
+export interface ExplainedItem {
+  item: ContentItemSummary;
+  rank: number;
+  score: number;
+  retrievers: ExplainRetriever[];
+}
+export interface SearchExplainResponse {
+  query: string;
+  mode: "hybrid" | "lexical";
+  fusion: string | null;
+  rank_constant: number;
+  rank_window: number;
+  total: number;
+  retrievers: { name: string; label: string; description: string }[];
+  items: ExplainedItem[];
+}
+
+export function searchExplain(q: string, size = 25): Promise<SearchExplainResponse> {
+  const params = new URLSearchParams({ q, size: String(size) });
+  return apiFetch(`/search-explain/?${params}`);
 }
 
 export function getContentItem(id: string): Promise<ContentItem> {

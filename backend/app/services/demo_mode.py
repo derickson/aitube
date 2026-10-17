@@ -1,4 +1,9 @@
-"""Demo Mode: restrict every content-bearing endpoint to one category.
+"""Demo Mode / Zen Mode: scope every content-bearing endpoint by one category.
+
+Zen Mode is the inverse of Demo Mode: it hides the "AI and Software" category and
+shows everything else. The two are mutually exclusive (Demo wins if both headers
+arrive). Everywhere below, `demo` is the active mode: "demo", "zen" or None, so
+existing truthiness checks mean "some scope is active".
 
 Demo Mode is a per-browser toggle in the frontend's settings menu. While it's
 on, the frontend's fetch wrapper sends `X-Demo-Mode: 1` on every API call, and
@@ -19,21 +24,31 @@ from fastapi import Depends, Header
 from backend.app.services.content_classifier import demo_category_label
 
 
-def _demo_mode(x_demo_mode: Annotated[str | None, Header()] = None) -> bool:
-    return x_demo_mode == "1"
+def _demo_mode(
+    x_demo_mode: Annotated[str | None, Header()] = None,
+    x_zen_mode: Annotated[str | None, Header()] = None,
+) -> str | None:
+    if x_demo_mode == "1":
+        return "demo"
+    if x_zen_mode == "1":
+        return "zen"
+    return None
 
 
-DemoMode = Annotated[bool, Depends(_demo_mode)]
+DemoMode = Annotated[str | None, Depends(_demo_mode)]
 
 
-async def demo_filter(demo: bool) -> dict[str, Any] | None:
-    """The ES filter clause for Demo Mode, or None when it's off."""
+async def demo_filter(demo: str | None) -> dict[str, Any] | None:
+    """The ES filter clause for Demo/Zen Mode, or None when neither is on."""
     if not demo:
         return None
-    return {"term": {"category": await demo_category_label()}}
+    clause = {"term": {"category": await demo_category_label()}}
+    if demo == "zen":
+        return {"bool": {"must_not": [clause]}}
+    return clause
 
 
-async def demo_filters(demo: bool) -> list[dict[str, Any]]:
+async def demo_filters(demo: str | None) -> list[dict[str, Any]]:
     """demo_filter as a list, for splatting into a bool `filter` array."""
     clause = await demo_filter(demo)
     return [clause] if clause else []
@@ -61,8 +76,9 @@ def count_by_cluster(cluster_ids: list[str | None]) -> dict[str, int]:
     return dict(Counter(cid for cid in cluster_ids if cid))
 
 
-async def in_demo_scope(demo: bool, source: dict[str, Any]) -> bool:
-    """Whether an already-fetched content item may be shown under Demo Mode."""
+async def in_demo_scope(demo: str | None, source: dict[str, Any]) -> bool:
+    """Whether an already-fetched content item may be shown under Demo/Zen Mode."""
     if not demo:
         return True
-    return source.get("category") == await demo_category_label()
+    is_demo_category = source.get("category") == await demo_category_label()
+    return is_demo_category if demo == "demo" else not is_demo_category

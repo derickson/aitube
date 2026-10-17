@@ -1,47 +1,82 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
-import { setApiDemoMode } from "../api/client";
+import { setApiDemoMode, setApiZenMode } from "../api/client";
 
-// Demo Mode restricts the whole site to the work-safe "AI and Software" category
-// (the backend does the filtering — backend/app/services/demo_mode.py). It's a
-// per-browser setting, so turning it on for a work laptop doesn't change what the
-// site shows anywhere else.
-const STORAGE_KEY = "aitube-demo-mode";
+// Demo Mode restricts the whole site to the work-safe "AI and Software" category;
+// Zen Mode is the inverse and hides that category (the backend does the filtering —
+// backend/app/services/demo_mode.py). They're per-browser settings, so turning one
+// on doesn't change what the site shows anywhere else, and they're mutually exclusive.
+const DEMO_KEY = "aitube-demo-mode";
+const ZEN_KEY = "aitube-zen-mode";
 
-function readStored(): boolean {
+function readStored(key: string): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) === "1";
+    return localStorage.getItem(key) === "1";
   } catch {
     return false;
   }
 }
 
+function store(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? "1" : "0");
+  } catch {
+    // Storage unavailable (private window etc.) — the toggle still works for this tab.
+  }
+}
+
 // Applied at module load, before any component mounts, so the very first API
 // requests (fired from child effects, which run before a provider's) already
-// carry the header.
-const initial = readStored();
-setApiDemoMode(initial);
+// carry the header. Demo wins if both somehow got stored.
+const initialDemo = readStored(DEMO_KEY);
+const initialZen = !initialDemo && readStored(ZEN_KEY);
+setApiDemoMode(initialDemo);
+setApiZenMode(initialZen);
 
 interface DemoModeValue {
   demoMode: boolean;
+  zenMode: boolean;
   setDemoMode: (on: boolean) => void;
+  setZenMode: (on: boolean) => void;
 }
 
-const DemoModeContext = createContext<DemoModeValue>({ demoMode: false, setDemoMode: () => {} });
+const DemoModeContext = createContext<DemoModeValue>({
+  demoMode: false,
+  zenMode: false,
+  setDemoMode: () => {},
+  setZenMode: () => {},
+});
 
 export function DemoModeProvider({ children }: { children: ReactNode }) {
-  const [demoMode, setState] = useState(initial);
+  const [demoMode, setDemoState] = useState(initialDemo);
+  const [zenMode, setZenState] = useState(initialZen);
 
   const setDemoMode = useCallback((on: boolean) => {
     setApiDemoMode(on);
-    try {
-      localStorage.setItem(STORAGE_KEY, on ? "1" : "0");
-    } catch {
-      // Storage unavailable (private window etc.) — the toggle still works for this tab.
+    store(DEMO_KEY, on);
+    setDemoState(on);
+    if (on) {
+      setApiZenMode(false);
+      store(ZEN_KEY, false);
+      setZenState(false);
     }
-    setState(on);
   }, []);
 
-  return <DemoModeContext.Provider value={{ demoMode, setDemoMode }}>{children}</DemoModeContext.Provider>;
+  const setZenMode = useCallback((on: boolean) => {
+    setApiZenMode(on);
+    store(ZEN_KEY, on);
+    setZenState(on);
+    if (on) {
+      setApiDemoMode(false);
+      store(DEMO_KEY, false);
+      setDemoState(false);
+    }
+  }, []);
+
+  return (
+    <DemoModeContext.Provider value={{ demoMode, zenMode, setDemoMode, setZenMode }}>
+      {children}
+    </DemoModeContext.Provider>
+  );
 }
 
 export function useDemoMode(): DemoModeValue {

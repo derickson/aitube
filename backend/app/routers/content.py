@@ -22,6 +22,23 @@ from backend.app.services.elasticsearch import (
 router = APIRouter(prefix="/api/content", tags=["content"])
 
 
+def build_lexical_query(q: str) -> dict[str, Any]:
+    """The BM25 leg of search; shared with the search-explain endpoint."""
+    return {
+        "multi_match": {
+            "query": q,
+            "fields": [
+                "title^3",
+                "summary^2",
+                "content_markdown",
+                "interest_reasoning",
+            ],
+            "type": "best_fields",
+            "fuzziness": "AUTO",
+        }
+    }
+
+
 class FacetBucket(BaseModel):
     key: str
     count: int
@@ -106,19 +123,7 @@ async def list_content(
             filter_clauses.append({"bool": {"must_not": {"terms": {"subcategory": excluded}}}})
     lexical_match: dict[str, Any] | None = None
     if q:
-        lexical_match = {
-            "multi_match": {
-                "query": q,
-                "fields": [
-                    "title^3",
-                    "summary^2",
-                    "content_markdown",
-                    "interest_reasoning",
-                ],
-                "type": "best_fields",
-                "fuzziness": "AUTO",
-            }
-        }
+        lexical_match = build_lexical_query(q)
         must.append(lexical_match)
 
     use_semantic = bool(

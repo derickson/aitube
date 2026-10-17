@@ -20,7 +20,7 @@ function GearIcon() {
 
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
-  const { demoMode, setDemoMode } = useDemoMode();
+  const { demoMode, setDemoMode, zenMode, setZenMode } = useDemoMode();
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
@@ -68,6 +68,20 @@ export function SettingsMenu() {
               onChange={(e) => setDemoMode(e.target.checked)}
             />
           </label>
+          <label
+            className="settings-switch-row"
+            role="menuitemcheckbox"
+            aria-checked={zenMode}
+            title="Hide AI and Software content across the whole site"
+          >
+            <span>Zen Mode</span>
+            <input
+              type="checkbox"
+              className="settings-switch"
+              checked={zenMode}
+              onChange={(e) => setZenMode(e.target.checked)}
+            />
+          </label>
           <div className="settings-divider" role="separator" />
           <NavLink to="/subscriptions/" role="menuitem" onClick={close}>
             Content
@@ -80,6 +94,9 @@ export function SettingsMenu() {
           </NavLink>
           <NavLink to="/engagement/" role="menuitem" onClick={close}>
             Engagement
+          </NavLink>
+          <NavLink to="/search-explain/" role="menuitem" onClick={close}>
+            Search Explain
           </NavLink>
           <NavLink to="/category-settings/" role="menuitem" onClick={close}>
             Category Settings
