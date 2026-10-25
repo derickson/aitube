@@ -119,6 +119,15 @@ Auth: same posture as the rest of the API — perimeter is enforced by nginx bas
 
 Suggested n8n webhook names if exposed: `aitube-content-transcript`, `aitube-quarantine-content-item`.
 
+### Observability (Elastic APM)
+
+Classic `elastic-apm` agent, configured from `ELASTIC_APM_*` in `.env` (API key preferred over secret token). Services: `aitube-backend` (FastAPI middleware), `aitube-poller` and `aitube-clusterer` (cron scripts), and `content-dlp` (sibling repo, Flask). `services/apm.py` holds the shared pieces:
+- `apm.transaction(name, type)` / `@apm.traced(name)` — opens a *separate* transaction for work outside a request: `create_task` jobs (add-content, watchlist ad-hoc, recategorize), the 15-min playback/watch-time flushes, and the poller (one transaction per subscription, named `poll_subscription <type>` and labelled with the feed, plus one per post-poll phase). A transaction spawned from a request is *linked* to it, and the caller's transaction is restored on exit. Don't go back to one transaction per poll run: a busy run can exceed the agent's 500-span cap, and every feed gets lumped into one number.
+- Distributed tracing to content-dlp needs no code: the agent instruments httpx and sends `traceparent`, which content-dlp's Flask agent continues.
+- `apm.configure_logging()` — root logging with ` trace.id=… transaction.id=…` appended to lines logged inside a transaction. `main.py` calls it too; before that, service INFO logs were dropped in Docker because uvicorn only configures its own loggers.
+- Browser RUM (`VITE_ELASTIC_APM_*`, `frontend/src/apm.ts`) is off by default and not expected to work against Serverless.
+- `cron.log` is rotated by `ops/logrotate.conf` (user-level logrotate from crontab).
+
 ### Environment
 
 - Python managed by `uv`, virtual environment at `~/.venvs/aitube`

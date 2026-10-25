@@ -23,7 +23,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.app.services import content_cache, content_classifier
+from backend.app.services import apm, content_cache, content_classifier
 from backend.app.services.content_classifier import classify_content
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
 
@@ -144,6 +144,7 @@ async def _classify_one(
     return hit["_id"], fields, error
 
 
+@apm.traced("recategorize_all")
 async def _run_recategorize() -> None:
     es = get_es_client()
     _recategorize_state.update(

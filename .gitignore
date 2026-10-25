@@ -24,7 +24,7 @@ frontend/*.tsbuildinfo
 
 # OS
 .DS_Store
-cron.log
+cron.log*
 
 .playwright-cli/
 .pytest_cache/

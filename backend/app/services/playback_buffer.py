@@ -3,6 +3,7 @@ import logging
 from collections import OrderedDict
 from datetime import datetime, timezone
 
+from backend.app.services import apm
 from backend.app.services.elasticsearch import PLAYBACK_STATE_INDEX, get_es_client
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ class PlaybackBuffer:
             next_slot = ((total_seconds // 900) + 1) * 900
             wait = next_slot - total_seconds
             await asyncio.sleep(wait)
-            await self.flush()
+            async with apm.transaction("playback_buffer.flush", "scheduled"):
+                await self.flush()
 
     def start(self) -> None:
         """Start the background flush scheduler."""

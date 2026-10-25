@@ -3,6 +3,7 @@ import logging
 from collections import OrderedDict
 from datetime import datetime, timezone
 
+from backend.app.services import apm
 from backend.app.services.elasticsearch import WATCH_TIME_INDEX, get_es_client
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,8 @@ class WatchTimeTracker:
             next_slot = ((total_seconds // 900) + 1) * 900
             wait = next_slot - total_seconds
             await asyncio.sleep(wait)
-            await self.flush()
+            async with apm.transaction("watch_time_tracker.flush", "scheduled"):
+                await self.flush()
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._scheduler())

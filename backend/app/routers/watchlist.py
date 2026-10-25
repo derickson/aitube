@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from backend.app.models.content import ContentType
-from backend.app.services import content_cache
+from backend.app.services import apm, content_cache
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
 
 logger = logging.getLogger(__name__)
@@ -142,6 +142,7 @@ async def add_videos(request: AddVideosRequest):
     return AddVideosResponse(accepted=accepted, skipped=skipped, errors=errors)
 
 
+@apm.traced("watchlist.process_adhoc_videos")
 async def _process_adhoc_videos(urls: list[str]) -> None:
     """Background task: process each URL through the YouTube pipeline."""
     from backend.app.services.feed_poller import (

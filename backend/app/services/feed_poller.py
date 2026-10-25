@@ -8,13 +8,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import elasticapm
 import httpx
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from backend.app.models.subscription import Subscription, SubscriptionType
-from backend.app.services import content_cache, content_dlp, corridor
+from backend.app.services import apm, content_cache, content_dlp, corridor
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -1307,26 +1308,39 @@ async def poll_all_active() -> dict[str, list[str]]:
         seen_urls[sub.url] = sub.id
         unique_subs.append(sub)
 
+    # One APM transaction per subscription and per phase, so slow feeds and slow
+    # phases each get their own latency series (named by type, labelled by feed).
     results: dict[str, list[str]] = {}
     for sub in unique_subs:
-        new_ids = await poll_subscription(sub)
-        if new_ids:
-            results[sub.id] = new_ids
+        async with apm.transaction(
+            f"poll_subscription {sub.type.value}",
+            "poll",
+            labels={"subscription_id": sub.id, "subscription_name": sub.name},
+        ):
+            new_ids = await poll_subscription(sub)
+            if new_ids:
+                results[sub.id] = new_ids
+                elasticapm.label(new_items=len(new_ids))
 
     # Clean up any duplicate content items from recent polls
-    await deduplicate_recent_items()
+    async with apm.transaction("deduplicate_recent_items", "poll"):
+        await deduplicate_recent_items()
 
     # Retry transcript fetch for videos and podcasts that failed on initial poll
-    await backfill_missing_transcripts()
+    async with apm.transaction("backfill_missing_transcripts", "poll"):
+        await backfill_missing_transcripts()
 
     # Generate summaries for recent items that are missing them
-    await backfill_missing_summaries()
+    async with apm.transaction("backfill_missing_summaries", "poll"):
+        await backfill_missing_summaries()
 
     # Retry summaries that failed due to a Hermes GPT-quota cooldown
-    await retry_failed_summaries()
+    async with apm.transaction("retry_failed_summaries", "poll"):
+        await retry_failed_summaries()
 
     # Categorize recent items that came through without a category
-    await backfill_missing_categories()
+    async with apm.transaction("backfill_missing_categories", "poll"):
+        await backfill_missing_categories()
 
     content_cache.invalidate()
     return results

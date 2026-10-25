@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.app.services import content_cache, content_dlp, corridor
+from backend.app.services import apm, content_cache, content_dlp, corridor
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     content_index_pipeline,
@@ -388,6 +388,7 @@ async def ingest_content(request: IngestRequest):
     return {"status": "accepted", "url": url, "type": detected_type}
 
 
+@apm.traced("add_content.process_content")
 async def _process_content(
     url: str,
     detected_type: str,
