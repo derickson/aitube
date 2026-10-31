@@ -863,9 +863,12 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
     cooldown_cutoff = (
         datetime.now(timezone.utc) - timedelta(hours=TRANSCRIPT_RETRY_COOLDOWN_HOURS)
     ).isoformat()
-    # transcript field isn't reliably queryable across index versions (v1 disables
-    # the whole object; v2 indexes transcript.text but not its absence), so fetch
-    # candidates by type/attempt-bounds and filter "has no transcript" in Python.
+    # The "no transcript" filter must happen in ES: thousands of videos match on
+    # type alone, and an unsorted 200-hit page of them is almost all transcribed,
+    # so filtering only in Python starved the backfill (it found 0 of 532 stuck
+    # items). v2 indexes transcript.text, so `exists` works; the Python filter
+    # below stays as a guard for the v1 mapping, where transcript is disabled.
+    # Newest first: fresh uploads are the ones whose captions appear later.
     resp = await es.search(
         index=CONTENT_ITEMS_INDEX,
         body={
@@ -875,6 +878,7 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
                         {"terms": {"type": ["video", "podcast_episode"]}},
                     ],
                     "must_not": [
+                        {"exists": {"field": "transcript.text"}},
                         # Corridor videos are DRM'd and play off-site; never transcribe them
                         {"prefix": {"external_id": corridor.EXTERNAL_ID_PREFIX}},
                         {"range": {"transcript_attempts": {"gte": MAX_TRANSCRIPT_ATTEMPTS}}},
@@ -886,6 +890,7 @@ async def backfill_missing_transcripts(limit: int = 5) -> int:
                 "title", "url", "type", "transcript", "metadata", "summary",
                 "transcript_attempts", "duration_seconds",
             ],
+            "sort": [{"discovered_at": {"order": "desc", "unmapped_type": "date"}}],
             "size": 200,
         },
     )
