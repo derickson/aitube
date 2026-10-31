@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { ErrorBanner } from "./ErrorBanner";
 import { ContentTabs } from "./ContentTabs";
 import { ChatPanel } from "./ChatPanel";
+import { useDetox } from "../detox/Detox";
 import {
   getContentItem,
   getPlayback,
@@ -90,6 +91,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   const panelRef = useRef<HTMLDivElement>(null);
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
+  const { active: detoxActive } = useDetox();
 
   // Keep flyout height matched to visible viewport; yield to CSS when maximized
   useEffect(() => {
@@ -161,6 +163,8 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
     apiSetConsumed(itemId, newConsumed).catch(() => {});
   };
 
+  // Dopamine Detox blocks YouTube videos only; Corridor plays off-site and is unaffected.
+  const videoBlocked = detoxActive && item.type === "video" && !isCorridorItem(item);
   const hasTranscript = item.transcript && (item.transcript.text || item.transcript.chunks?.length > 0);
 
   const description =
@@ -205,9 +209,11 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
             >
               {isMaximized ? "Restore" : "Fill Window"}
             </button>
-            <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
-              Original
-            </a>
+            {!videoBlocked && (
+              <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
+                Original
+              </a>
+            )}
             <button
               className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
               onClick={handleMarkViewed}
@@ -242,6 +248,8 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
               apiSetConsumed(itemId, true).catch(() => {});
             }}
           />
+        ) : videoBlocked ? (
+          <DetoxBlocked item={item} />
         ) : item.type === "video" && (
           <YouTubePlayer
             item={item}
@@ -309,9 +317,11 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
             )}
 
             <div className="flyout-actions flyout-actions-bottom">
-              <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
-                Original
-              </a>
+              {!videoBlocked && (
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className="btn">
+                  Original
+                </a>
+              )}
               <button
                 className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
                 onClick={handleMarkViewed}
@@ -371,6 +381,22 @@ function CorridorLink({ item, onConsumed }: { item: ContentItem; onConsumed: () 
       {item.thumbnail_url && <img src={item.thumbnail_url} alt="" />}
       <span className="corridor-link-cta">Watch on Corridor ↗</span>
     </a>
+  );
+}
+
+// --- Dopamine Detox (replaces the YouTube player) ---
+
+function DetoxBlocked({ item }: { item: ContentItem }) {
+  const { endsAt } = useDetox();
+  return (
+    <div className="detox-blocked">
+      {item.thumbnail_url && <img src={item.thumbnail_url} alt="" />}
+      <span className="detox-blocked-msg">
+        Dopamine Detox — videos unlock{" "}
+        {endsAt != null &&
+          new Date(endsAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}
+      </span>
+    </div>
   );
 }
 

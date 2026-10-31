@@ -12,16 +12,19 @@ import { QuarantinePage } from "./components/QuarantinePage";
 import { WatchTimePage } from "./components/WatchTimePage";
 import { EngagementPage } from "./components/EngagementPage";
 import { CategorySettingsPage } from "./components/CategorySettingsPage";
+import { DetoxPage } from "./components/DetoxPage";
 import { NotFound } from "./components/NotFound";
 import { ThemeToggle } from "./theme/ThemeToggle";
 import { SettingsMenu } from "./components/SettingsMenu";
 import { getInitialTheme, applyTheme } from "./theme/theme";
 import { DemoModeProvider, useDemoMode } from "./demo/DemoMode";
+import { DetoxProvider, useDetox } from "./detox/Detox";
 import type { Theme } from "./theme/theme";
 
 function AppContent() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const { demoMode, zenMode } = useDemoMode();
+  const { active: detoxActive } = useDetox();
 
   useEffect(() => {
     applyTheme(theme);
@@ -49,6 +52,11 @@ function AppContent() {
             Zen
           </span>
         )}
+        {detoxActive && (
+          <NavLink to="/detox/" className="demo-badge" title="Dopamine Detox: videos won't play">
+            Detox
+          </NavLink>
+        )}
         <nav>
           <NavLink to="/">Timeline</NavLink>
           <NavLink to="/search/">Search</NavLink>
@@ -75,6 +83,7 @@ function AppContent() {
           <Route path="/watch-time/" element={<WatchTimePage />} />
           <Route path="/engagement/" element={<EngagementPage />} />
           <Route path="/category-settings/" element={<CategorySettingsPage />} />
+          <Route path="/detox/" element={<DetoxPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
@@ -86,7 +95,9 @@ export default function App() {
   return (
     <BrowserRouter basename="/aitube/">
       <DemoModeProvider>
-        <AppContent />
+        <DetoxProvider>
+          <AppContent />
+        </DetoxProvider>
       </DemoModeProvider>
     </BrowserRouter>
   );

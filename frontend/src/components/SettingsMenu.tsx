@@ -101,6 +101,9 @@ export function SettingsMenu() {
           <NavLink to="/category-settings/" role="menuitem" onClick={close}>
             Category Settings
           </NavLink>
+          <NavLink to="/detox/" role="menuitem" onClick={close}>
+            Dopamine Detox
+          </NavLink>
         </div>
       )}
     </div>

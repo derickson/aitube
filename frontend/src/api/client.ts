@@ -790,3 +790,21 @@ export function recategorizeAllVideos(): Promise<{ status: string }> {
 export function getRecategorizeStatus(): Promise<RecategorizeStatus> {
   return apiFetch("/category/recategorize/status/");
 }
+
+// --- Dopamine Detox ---
+
+export type DetoxDuration = "3h" | "1d" | "3d";
+
+export interface DetoxStatus {
+  active: boolean;
+  until: string | null;
+  remaining_seconds: number;
+}
+
+export async function getDetox(): Promise<DetoxStatus> {
+  return apiFetch("/detox/");
+}
+
+export async function startDetox(duration: DetoxDuration): Promise<DetoxStatus> {
+  return apiFetch("/detox/", { method: "POST", body: JSON.stringify({ duration }) });
+}
