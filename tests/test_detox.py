@@ -20,9 +20,9 @@ def et(*args) -> datetime:
     return datetime(*args, tzinfo=ET)
 
 
-def test_three_hours_is_240_minutes():
+def test_three_hours_is_180_minutes():
     now = et(2026, 10, 31, 20, 15)
-    assert detox.compute_until("3h", now) == now + timedelta(minutes=240)
+    assert detox.compute_until("3h", now) == now + timedelta(minutes=180)
 
 
 @pytest.mark.parametrize("now", [et(2026, 10, 31, 0, 30), et(2026, 10, 31, 23, 59)])

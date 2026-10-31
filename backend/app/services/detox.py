@@ -22,11 +22,11 @@ _until: datetime | None = None
 def compute_until(duration: Duration, now: datetime) -> datetime:
     """When a detox started at `now` ends.
 
-    3h: 240 minutes from now. 1d: 2am Eastern on the next calendar day.
+    3h: 180 minutes from now. 1d: 2am Eastern on the next calendar day.
     3d: 2am Eastern after three midnights have passed.
     """
     if duration == "3h":
-        return now + timedelta(minutes=240)
+        return now + timedelta(minutes=180)
     days = {"1d": 1, "3d": 3}[duration]
     local_date = now.astimezone(EASTERN).date() + timedelta(days=days)
     return datetime.combine(local_date, RELEASE_TIME, tzinfo=EASTERN).astimezone(timezone.utc)

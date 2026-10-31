@@ -4,7 +4,7 @@ import { formatRemaining, useDetox } from "../detox/Detox";
 import type { DetoxDuration } from "../api/client";
 
 const OPTIONS: { duration: DetoxDuration; label: string; detail: string }[] = [
-  { duration: "3h", label: "3 hours", detail: "Ends 240 minutes from now" },
+  { duration: "3h", label: "3 hours", detail: "Ends 180 minutes from now" },
   { duration: "1d", label: "1 day", detail: "Ends at 2am Eastern tomorrow" },
   { duration: "3d", label: "3 days", detail: "Ends at 2am Eastern after three midnights" },
 ];
