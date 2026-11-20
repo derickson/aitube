@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { getDetox, startDetox, type DetoxDuration, type DetoxStatus } from "../api/client";
+import { useFeature } from "../features/Features";
 
 // Dopamine Detox: a timed lock (held in backend memory — backend/app/services/detox.py)
 // during which YouTube videos don't play. It applies to every browser, and the only
@@ -28,16 +29,20 @@ export function DetoxProvider({ children }: { children: ReactNode }) {
   const [endsAt, setEndsAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  const enabled = useFeature("detox");
+
   const refresh = useCallback(() => {
     getDetox().then((s) => setEndsAt(toEndsAt(s))).catch(() => {});
   }, []);
 
   // Poll so a detox started (or cleared by a restart) elsewhere shows up here.
+  // Deployments without the detox feature (work) have no endpoint to poll.
   useEffect(() => {
+    if (!enabled) return;
     refresh();
     const id = setInterval(refresh, POLL_MS);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   // Tick once a second while active so it releases exactly on time.
   useEffect(() => {

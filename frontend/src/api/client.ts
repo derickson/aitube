@@ -33,6 +33,38 @@ export async function apiFetch<T>(
   return res.json();
 }
 
+// Personal-state writes (consumed / viewed / interest / playback position) exist only
+// where the "user_state" feature is enabled (not on the passive work deployment,
+// where the endpoints 404). When it's off these calls resolve locally without a
+// request, so the many call sites that fire them need no feature checks of their own.
+let userStateEnabled = true;
+
+export function setApiUserStateEnabled(on: boolean): void {
+  userStateEnabled = on;
+}
+
+function userStateWrite<T>(path: string, options: RequestInit, offline: T): Promise<T> {
+  return userStateEnabled ? apiFetch<T>(path, options) : Promise.resolve(offline);
+}
+
+// --- App config / features (backend/app/features.py) ---
+
+export interface FeatureInfo {
+  id: string;
+  label: string;
+  kind: "core" | "nav" | "settings" | "toggle" | "capability";
+  route: string | null;
+}
+
+export interface AppConfig {
+  deployment: string;
+  features: FeatureInfo[];
+}
+
+export function getAppConfig(): Promise<AppConfig> {
+  return apiFetch("/config/");
+}
+
 // --- Types ---
 
 export type SubscriptionType = "youtube_channel" | "podcast" | "rss" | "corridor_show";
@@ -298,15 +330,19 @@ export function transcribeContentItem(id: string): Promise<{ status: string; tra
 }
 
 export function setConsumed(id: string, consumed: boolean): Promise<{ id: string; consumed: boolean }> {
-  return apiFetch(`/content/${id}/consumed/?consumed=${consumed}`, { method: "PUT" });
+  return userStateWrite(`/content/${id}/consumed/?consumed=${consumed}`, { method: "PUT" }, { id, consumed });
 }
 
 export function setViewed(id: string): Promise<{ id: string; viewed: boolean }> {
-  return apiFetch(`/content/${id}/viewed/`, { method: "PUT" });
+  return userStateWrite(`/content/${id}/viewed/`, { method: "PUT" }, { id, viewed: true });
 }
 
 export function setInterest(id: string, interest: "up" | "down" | "none"): Promise<{ id: string; interest: string | null }> {
-  return apiFetch(`/content/${id}/interest/?interest=${interest}`, { method: "PUT" });
+  return userStateWrite(
+    `/content/${id}/interest/?interest=${interest}`,
+    { method: "PUT" },
+    { id, interest: interest === "none" ? null : interest },
+  );
 }
 
 export interface PlaybackProgress {
@@ -335,10 +371,16 @@ export function updatePlayback(
 ): Promise<PlaybackState> {
   const body: Record<string, number> = { position_seconds: positionSeconds };
   if (durationSeconds !== undefined) body.duration_seconds = durationSeconds;
-  return apiFetch(`/playback/${contentItemId}/`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+  return userStateWrite<PlaybackState>(
+    `/playback/${contentItemId}/`,
+    { method: "PUT", body: JSON.stringify(body) },
+    {
+      content_item_id: contentItemId,
+      position_seconds: positionSeconds,
+      consumed: false,
+      last_updated_at: new Date().toISOString(),
+    },
+  );
 }
 
 // --- Chat ---

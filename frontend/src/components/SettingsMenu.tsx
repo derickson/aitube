@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useDemoMode } from "../demo/DemoMode";
+import { useFeatures } from "../features/Features";
 
 function GearIcon() {
   return (
@@ -21,6 +22,7 @@ function GearIcon() {
 export function SettingsMenu() {
   const [open, setOpen] = useState(false);
   const { demoMode, setDemoMode, zenMode, setZenMode } = useDemoMode();
+  const { features, has } = useFeatures();
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
@@ -41,6 +43,27 @@ export function SettingsMenu() {
     };
   }, [open, close]);
 
+  const toggles = [
+    {
+      id: "demo_mode",
+      label: "Demo Mode",
+      title: "Show only AI and Software content across the whole site",
+      checked: demoMode,
+      onChange: setDemoMode,
+    },
+    {
+      id: "zen_mode",
+      label: "Zen Mode",
+      title: "Hide AI and Software content across the whole site",
+      checked: zenMode,
+      onChange: setZenMode,
+    },
+  ].filter((t) => has(t.id));
+  const pages = features.filter((f) => f.kind === "settings" && f.route);
+
+  // Nothing to put in the menu (e.g. the passive work deployment): no gear at all.
+  if (toggles.length === 0 && pages.length === 0) return null;
+
   return (
     <div className="settings-menu" ref={rootRef}>
       <button
@@ -54,56 +77,31 @@ export function SettingsMenu() {
       </button>
       {open && (
         <div className="settings-dropdown" role="menu">
-          <label
-            className="settings-switch-row"
-            role="menuitemcheckbox"
-            aria-checked={demoMode}
-            title="Show only AI and Software content across the whole site"
-          >
-            <span>Demo Mode</span>
-            <input
-              type="checkbox"
-              className="settings-switch"
-              checked={demoMode}
-              onChange={(e) => setDemoMode(e.target.checked)}
-            />
-          </label>
-          <label
-            className="settings-switch-row"
-            role="menuitemcheckbox"
-            aria-checked={zenMode}
-            title="Hide AI and Software content across the whole site"
-          >
-            <span>Zen Mode</span>
-            <input
-              type="checkbox"
-              className="settings-switch"
-              checked={zenMode}
-              onChange={(e) => setZenMode(e.target.checked)}
-            />
-          </label>
-          <div className="settings-divider" role="separator" />
-          <NavLink to="/subscriptions/" role="menuitem" onClick={close}>
-            Content
-          </NavLink>
-          <NavLink to="/quarantine/" role="menuitem" onClick={close}>
-            Quarantine
-          </NavLink>
-          <NavLink to="/watch-time/" role="menuitem" onClick={close}>
-            Watch Time
-          </NavLink>
-          <NavLink to="/engagement/" role="menuitem" onClick={close}>
-            Engagement
-          </NavLink>
-          <NavLink to="/search-explain/" role="menuitem" onClick={close}>
-            Search Explain
-          </NavLink>
-          <NavLink to="/category-settings/" role="menuitem" onClick={close}>
-            Category Settings
-          </NavLink>
-          <NavLink to="/detox/" role="menuitem" onClick={close}>
-            Dopamine Detox
-          </NavLink>
+          {toggles.map((t) => (
+            <label
+              key={t.id}
+              className="settings-switch-row"
+              role="menuitemcheckbox"
+              aria-checked={t.checked}
+              title={t.title}
+            >
+              <span>{t.label}</span>
+              <input
+                type="checkbox"
+                className="settings-switch"
+                checked={t.checked}
+                onChange={(e) => t.onChange(e.target.checked)}
+              />
+            </label>
+          ))}
+          {toggles.length > 0 && pages.length > 0 && (
+            <div className="settings-divider" role="separator" />
+          )}
+          {pages.map((f) => (
+            <NavLink key={f.id} to={f.route!} role="menuitem" onClick={close}>
+              {f.label}
+            </NavLink>
+          ))}
         </div>
       )}
     </div>

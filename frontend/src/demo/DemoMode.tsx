@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 import { setApiDemoMode, setApiZenMode } from "../api/client";
+import { useFeature } from "../features/Features";
 
 // Demo Mode restricts the whole site to the work-safe "AI and Software" category;
 // Zen Mode is the inverse and hides that category (the backend does the filtering —
@@ -47,8 +48,22 @@ const DemoModeContext = createContext<DemoModeValue>({
 });
 
 export function DemoModeProvider({ children }: { children: ReactNode }) {
-  const [demoMode, setDemoState] = useState(initialDemo);
-  const [zenMode, setZenState] = useState(initialZen);
+  // A deployment without these toggles (e.g. work) must not apply a stale stored
+  // value it offers no way to turn off. The feature set is fixed for the page's
+  // lifetime and this provider mounts before any page, so resolving it in the
+  // state initializers covers the first API request.
+  const demoAllowed = useFeature("demo_mode");
+  const zenAllowed = useFeature("zen_mode");
+  const [demoMode, setDemoState] = useState(() => {
+    const on = initialDemo && demoAllowed;
+    setApiDemoMode(on);
+    return on;
+  });
+  const [zenMode, setZenState] = useState(() => {
+    const on = initialZen && zenAllowed;
+    setApiZenMode(on);
+    return on;
+  });
 
   const setDemoMode = useCallback((on: boolean) => {
     setApiDemoMode(on);

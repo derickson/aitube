@@ -18,6 +18,7 @@ import { ContentView } from "./ContentView";
 import { ErrorBanner } from "./ErrorBanner";
 import { ContentCard, TYPE_LABELS } from "./ContentCard";
 import { useDemoMode } from "../demo/DemoMode";
+import { useFeature } from "../features/Features";
 
 function facetCount(buckets: FacetBucket[] | undefined, key: string): number {
   return buckets?.find((b) => b.key === key)?.count ?? 0;
@@ -131,6 +132,7 @@ export function Timeline() {
   // In Demo Mode the backend restricts everything to one category, so the
   // Category facet would be a single bucket — hide it and its filter.
   const { demoMode } = useDemoMode();
+  const userStateEnabled = useFeature("user_state");
 
   const consumedFilterRef = useRef<"true" | "false" | "">("false");
   const interestFilterRef = useRef<"up" | "down" | "none" | "">("");
@@ -354,6 +356,9 @@ export function Timeline() {
             ))}
           </div>
 
+          {/* Status and Interest are personal state, which deployments without
+              user_state (work) neither record nor show. */}
+          {userStateEnabled && (<>
           <div className="facet-group">
             <h4 className="facet-heading">Status</h4>
             <button
@@ -399,6 +404,7 @@ export function Timeline() {
               <span>Not interested</span><span className="facet-count">{facetCount(interestBuckets, "down")}</span>
             </button>
           </div>
+          </>)}
 
           {!demoMode && (
             <TriStateFacet heading="Category" labels={categoryLabels} filter={categoryFilter} buckets={categoryBuckets} />

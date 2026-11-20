@@ -1,4 +1,5 @@
 import { displayType } from "../api/client";
+import { useFeature } from "../features/Features";
 import type {
   ContentItemSummary,
   DisplayType,
@@ -56,6 +57,9 @@ export function ContentCard({
   showActions?: boolean;
 }) {
   const description = item.summary || "";
+  // Watched / interest buttons write personal state; deployments without the
+  // user_state feature (work) don't show them on any page.
+  const userStateEnabled = useFeature("user_state");
 
   const classes = [
     "content-card",
@@ -109,7 +113,7 @@ export function ContentCard({
           <span className={`content-type-badge content-type-${displayType(item)}`}>
             {TYPE_LABELS[displayType(item)]}
           </span>
-          {showActions && (
+          {showActions && userStateEnabled && (
             <span className="content-interest-btns">
               <button
                 className={`interest-btn interest-consumed${isConsumed ? " active" : ""}`}

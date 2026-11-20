@@ -3,6 +3,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { ContentTabs } from "./ContentTabs";
 import { ChatPanel } from "./ChatPanel";
 import { useDetox } from "../detox/Detox";
+import { useFeature } from "../features/Features";
 import {
   getContentItem,
   getPlayback,
@@ -92,6 +93,8 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
   const audioSeekRef = useRef<((time: number) => void) | null>(null);
   const videoSeekRef = useRef<((time: number) => void) | null>(null);
   const { active: detoxActive } = useDetox();
+  const chatEnabled = useFeature("chat");
+  const userStateEnabled = useFeature("user_state");
 
   // Keep flyout height matched to visible viewport; yield to CSS when maximized
   useEffect(() => {
@@ -214,12 +217,14 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
                 Original
               </a>
             )}
-            <button
-              className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
-              onClick={handleMarkViewed}
-            >
-              {consumed ? "Viewed" : "Mark Viewed"}
-            </button>
+            {userStateEnabled && (
+              <button
+                className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
+                onClick={handleMarkViewed}
+              >
+                {consumed ? "Viewed" : "Mark Viewed"}
+              </button>
+            )}
             <button className="btn" onClick={onClose}>Close</button>
           </div>
         </div>
@@ -275,7 +280,7 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
           tabs={[
             { id: "summary", label: "Summary" },
             ...(hasTranscript ? [{ id: "transcript", label: "Transcript" }] : []),
-            { id: "chat", label: "Chat" },
+            ...(chatEnabled ? [{ id: "chat", label: "Chat" }] : []),
           ]}
           activeTab={activeTab}
           onTabChange={setActiveTab}
@@ -349,18 +354,20 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
             </div>
           )}
 
-          <div style={{ display: activeTab === "chat" ? "flex" : "none" }} className="chat-tab-panel">
-            <ChatPanel
-              item={item}
-              onSeek={(time) => {
-                if (item.type === "podcast_episode") {
-                  audioSeekRef.current?.(time);
-                } else if (item.type === "video") {
-                  videoSeekRef.current?.(time);
-                }
-              }}
-            />
-          </div>
+          {chatEnabled && (
+            <div style={{ display: activeTab === "chat" ? "flex" : "none" }} className="chat-tab-panel">
+              <ChatPanel
+                item={item}
+                onSeek={(time) => {
+                  if (item.type === "podcast_episode") {
+                    audioSeekRef.current?.(time);
+                  } else if (item.type === "video") {
+                    videoSeekRef.current?.(time);
+                  }
+                }}
+              />
+            </div>
+          )}
         </ContentTabs>
       </div>
     </aside>

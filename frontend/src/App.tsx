@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactElement } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
 
 import { Timeline } from "./components/Timeline";
@@ -19,18 +19,40 @@ import { SettingsMenu } from "./components/SettingsMenu";
 import { getInitialTheme, applyTheme } from "./theme/theme";
 import { DemoModeProvider, useDemoMode } from "./demo/DemoMode";
 import { DetoxProvider, useDetox } from "./detox/Detox";
+import { FeaturesProvider, useFeatures } from "./features/Features";
 import type { Theme } from "./theme/theme";
+
+// Every page belongs to a feature (backend/app/features.py). A page whose feature is
+// off for this deployment gets no route, so its URL falls through to NotFound; its
+// nav / settings-menu link comes from the same feature list.
+const PAGES: { feature: string; paths: string[]; element: ReactElement }[] = [
+  { feature: "timeline", paths: ["/"], element: <Timeline /> },
+  { feature: "search", paths: ["/search/"], element: <Search /> },
+  { feature: "search_explain", paths: ["/search-explain/"], element: <SearchExplain /> },
+  { feature: "topic_flow", paths: ["/topic-flow/"], element: <TopicFlow /> },
+  { feature: "embeddings", paths: ["/embeddings/"], element: <EmbeddingsView /> },
+  { feature: "prediction", paths: ["/prediction/"], element: <Prediction /> },
+  { feature: "content", paths: ["/subscriptions/", "/add-content/"], element: <SubscriptionManager /> },
+  { feature: "quarantine", paths: ["/quarantine/"], element: <QuarantinePage /> },
+  { feature: "watch_time", paths: ["/watch-time/"], element: <WatchTimePage /> },
+  { feature: "engagement", paths: ["/engagement/"], element: <EngagementPage /> },
+  { feature: "category_settings", paths: ["/category-settings/"], element: <CategorySettingsPage /> },
+  { feature: "detox", paths: ["/detox/"], element: <DetoxPage /> },
+];
 
 function AppContent() {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const { demoMode, zenMode } = useDemoMode();
   const { active: detoxActive } = useDetox();
+  const { features, has } = useFeatures();
 
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
   const handleToggle = useCallback((t: Theme) => setTheme(t), []);
+
+  const navItems = features.filter((f) => f.kind === "nav" && f.route);
 
   return (
     <>
@@ -58,11 +80,11 @@ function AppContent() {
           </NavLink>
         )}
         <nav>
-          <NavLink to="/">Timeline</NavLink>
-          <NavLink to="/search/">Search</NavLink>
-          <NavLink to="/topic-flow/">Topic Flow</NavLink>
-          <NavLink to="/embeddings/">Embeddings</NavLink>
-          <NavLink to="/prediction/">Prediction</NavLink>
+          {navItems.map((f) => (
+            <NavLink key={f.id} to={f.route!} end={f.route === "/"}>
+              {f.label}
+            </NavLink>
+          ))}
         </nav>
         <ThemeToggle theme={theme} onToggle={handleToggle} />
         <SettingsMenu />
@@ -71,19 +93,9 @@ function AppContent() {
         {/* Keyed on Demo/Zen Mode so flipping them remounts the current page, which
             refetches everything under the new scope. */}
         <Routes key={demoMode ? "demo" : zenMode ? "zen" : "full"}>
-          <Route path="/" element={<Timeline />} />
-          <Route path="/search/" element={<Search />} />
-          <Route path="/search-explain/" element={<SearchExplain />} />
-          <Route path="/topic-flow/" element={<TopicFlow />} />
-          <Route path="/embeddings/" element={<EmbeddingsView />} />
-          <Route path="/prediction/" element={<Prediction />} />
-          <Route path="/subscriptions/" element={<SubscriptionManager />} />
-          <Route path="/add-content/" element={<SubscriptionManager />} />
-          <Route path="/quarantine/" element={<QuarantinePage />} />
-          <Route path="/watch-time/" element={<WatchTimePage />} />
-          <Route path="/engagement/" element={<EngagementPage />} />
-          <Route path="/category-settings/" element={<CategorySettingsPage />} />
-          <Route path="/detox/" element={<DetoxPage />} />
+          {PAGES.filter((p) => has(p.feature)).flatMap((p) =>
+            p.paths.map((path) => <Route key={path} path={path} element={p.element} />),
+          )}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
@@ -94,11 +106,13 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter basename="/aitube/">
-      <DemoModeProvider>
-        <DetoxProvider>
-          <AppContent />
-        </DetoxProvider>
-      </DemoModeProvider>
+      <FeaturesProvider>
+        <DemoModeProvider>
+          <DetoxProvider>
+            <AppContent />
+          </DetoxProvider>
+        </DemoModeProvider>
+      </FeaturesProvider>
     </BrowserRouter>
   );
 }

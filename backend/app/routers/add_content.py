@@ -14,6 +14,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.app.features import require_feature
 from backend.app.services import apm, content_cache, content_dlp, corridor
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
@@ -200,7 +201,7 @@ async def _ensure_not_in_library(url: str, detected_type: str) -> None:
 # --- Endpoints ---
 
 
-@router.post("/preview/", response_model=ContentPreview)
+@router.post("/preview/", response_model=ContentPreview, dependencies=[require_feature("content")])
 async def preview_content(request: PreviewRequest):
     """Detect content type and fetch lightweight metadata for preview."""
     _cleanup_cache()
@@ -341,7 +342,7 @@ async def _preview_article(url: str, preview_id: str, preview_data: dict) -> Con
     )
 
 
-@router.post("/confirm/")
+@router.post("/confirm/", dependencies=[require_feature("content")])
 async def confirm_content(request: ConfirmRequest):
     """Confirm content submission — fires background processing."""
     _cleanup_cache()
@@ -367,7 +368,7 @@ async def confirm_content(request: ConfirmRequest):
     return {"status": "accepted"}
 
 
-@router.post("/ingest/")
+@router.post("/ingest/", dependencies=[require_feature("external_api")])
 async def ingest_content(request: IngestRequest):
     """Direct content ingest without preview — for automation scripts."""
     url = request.url.strip()

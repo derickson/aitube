@@ -4,9 +4,26 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
-    # Elasticsearch Serverless
+    # Which deployment this is: "prod" (smaug, active) or "work" (passive public demo).
+    # Picks the feature set in backend/app/features.py; the two comma lists below
+    # override single feature ids on top of it.
+    deployment: str = "prod"
+    features_enable: str = ""
+    features_disable: str = ""
+
+    # Serve the built frontend from FastAPI at /aitube/ (single-container image only).
+    # Empty = API only, as in `make dev` and the smaug compose deployment.
+    serve_frontend_dir: str = ""
+
+    # Elasticsearch Serverless. On the work deployment these point at the work cluster.
     elasticsearch_url: str = "http://localhost:9200"
     elasticsearch_api_key: str = ""
+
+    # Work cluster mirror (prod only). When set, content of subscriptions flagged
+    # `mirror_to_work` is also written to this cluster. Never set on the work deployment.
+    work_elasticsearch_url: str = ""
+    work_elasticsearch_api_key: str = ""
+    work_mirror_days: int = 14
 
     # Content index + semantic search (flip to v2 + true after EIS reindex cutover)
     content_items_index: str = "aitube-content-items"

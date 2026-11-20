@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from backend.app.features import require_feature
 from backend.app.config import settings
 from backend.app.models.content import ContentItem, ContentItemSummary
 from backend.app.services import content_cache
@@ -50,7 +51,7 @@ class ContentSearchResponse(BaseModel):
     facets: dict[str, list[FacetBucket]]
 
 
-@router.get("/", response_model=ContentSearchResponse)
+@router.get("/", response_model=ContentSearchResponse, dependencies=[require_feature("core")])
 async def list_content(
     subscription_id: str | None = None,
     content_type: str | None = None,
@@ -262,7 +263,7 @@ class PredictionResponse(BaseModel):
     unscored: int
 
 
-@router.get("/predictions/", response_model=PredictionResponse)
+@router.get("/predictions/", response_model=PredictionResponse, dependencies=[require_feature("prediction")])
 async def predictions(limit: int | None = Query(default=None, le=500), demo: DemoMode = False):
     """ML-ranked watchlist split.
 
@@ -437,7 +438,7 @@ def _verdict(interest_pct: float | None, engagement_pct: float | None) -> str:
     return "split"
 
 
-@router.get("/quarantine-stats/", response_model=QuarantineStatsResponse)
+@router.get("/quarantine-stats/", response_model=QuarantineStatsResponse, dependencies=[require_feature("quarantine")])
 async def quarantine_stats(demo: DemoMode = False):
     """Analytics over the quarantine history: how much is getting pulled, why,
     from where, and whether our own interest/engagement models liked it right
@@ -621,7 +622,7 @@ async def quarantine_stats(demo: DemoMode = False):
     )
 
 
-@router.get("/{item_id}/", response_model=ContentItem)
+@router.get("/{item_id}/", response_model=ContentItem, dependencies=[require_feature("core")])
 async def get_content_item(item_id: str, demo: DemoMode = False):
     es = get_es_client()
     try:
@@ -633,7 +634,7 @@ async def get_content_item(item_id: str, demo: DemoMode = False):
     return ContentItem(id=resp["_id"], **resp["_source"])
 
 
-@router.post("/{item_id}/transcribe/")
+@router.post("/{item_id}/transcribe/", dependencies=[require_feature("content")])
 async def transcribe_content_item(item_id: str):
     """Trigger transcription for a content item. Downloads audio and runs local Parakeet TDT."""
     from backend.app.services import content_dlp
@@ -693,7 +694,7 @@ async def transcribe_content_item(item_id: str):
 # read (or a client hard-refresh) can re-query ES before its ~1s refresh and
 # cache the pre-write state for the full content_cache TTL — making a
 # just-consumed item linger in unwatched lists.
-@router.put("/{item_id}/consumed/")
+@router.put("/{item_id}/consumed/", dependencies=[require_feature("user_state")])
 async def set_consumed(item_id: str, consumed: bool = True):
     es = get_es_client()
     await es.update(
@@ -703,7 +704,7 @@ async def set_consumed(item_id: str, consumed: bool = True):
     return {"id": item_id, "consumed": consumed}
 
 
-@router.put("/{item_id}/viewed/")
+@router.put("/{item_id}/viewed/", dependencies=[require_feature("user_state")])
 async def set_viewed(item_id: str):
     es = get_es_client()
     await es.update(
@@ -713,7 +714,7 @@ async def set_viewed(item_id: str):
     return {"id": item_id, "viewed": True}
 
 
-@router.put("/{item_id}/interest/")
+@router.put("/{item_id}/interest/", dependencies=[require_feature("user_state")])
 async def set_interest(item_id: str, interest: str = "up"):
     """Set interest on a content item: 'up', 'down', or 'none' to clear."""
     es = get_es_client()
@@ -736,7 +737,7 @@ async def set_interest(item_id: str, interest: str = "up"):
     return {"id": item_id, "interest": interest if interest != "none" else None}
 
 
-@router.post("/playback-progress/")
+@router.post("/playback-progress/", dependencies=[require_feature("core")])
 async def batch_playback_progress(item_ids: list[str]):
     """Get playback progress for multiple content items at once."""
     if not item_ids:
@@ -779,7 +780,7 @@ async def batch_playback_progress(item_ids: list[str]):
     return result
 
 
-@router.get("/export/csv/")
+@router.get("/export/csv/", dependencies=[require_feature("content")])
 async def export_csv():
     """Export all content items as CSV using ES scroll cursor."""
     from fastapi.responses import StreamingResponse
@@ -840,7 +841,7 @@ async def export_csv():
     )
 
 
-@router.delete("/{item_id}/")
+@router.delete("/{item_id}/", dependencies=[require_feature("content")])
 async def delete_content_item(item_id: str):
     es = get_es_client()
     await es.delete(index=CONTENT_ITEMS_INDEX, id=item_id)
@@ -848,7 +849,7 @@ async def delete_content_item(item_id: str):
     return {"deleted": item_id}
 
 
-@router.delete("/by-external-id/{external_id}/")
+@router.delete("/by-external-id/{external_id}/", dependencies=[require_feature("external_api")])
 async def delete_by_external_id(external_id: str):
     """Delete a content item by its external_id (e.g. yt_dQw4w9WgXcQ)."""
     es = get_es_client()

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
+from backend.app.features import require_feature
 from backend.app.models.playback import PlaybackState, PlaybackUpdate
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
@@ -15,7 +16,7 @@ from backend.app.services.watch_time_tracker import watch_time_tracker
 router = APIRouter(prefix="/api/playback", tags=["playback"])
 
 
-@router.get("/{content_item_id}/", response_model=PlaybackState | None)
+@router.get("/{content_item_id}/", response_model=PlaybackState | None, dependencies=[require_feature("core")])
 async def get_playback(content_item_id: str):
     # Check in-memory buffer first for the most recent uncommitted state
     buffered = playback_buffer.get(content_item_id)
@@ -46,7 +47,7 @@ async def get_playback(content_item_id: str):
     return PlaybackState(**hits[0]["_source"])
 
 
-@router.put("/{content_item_id}/", response_model=PlaybackState)
+@router.put("/{content_item_id}/", response_model=PlaybackState, dependencies=[require_feature("user_state")])
 async def update_playback(content_item_id: str, data: PlaybackUpdate):
     es = get_es_client()
 

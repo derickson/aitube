@@ -23,6 +23,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.app.features import require_feature
 from backend.app.services import apm, content_cache, content_classifier
 from backend.app.services.content_classifier import classify_content
 from backend.app.services.elasticsearch import CONTENT_ITEMS_INDEX, get_es_client
@@ -66,13 +67,13 @@ class CategorySettingsOut(BaseModel):
     categories: list[CategoryOut]
 
 
-@router.get("/settings/", response_model=CategorySettingsOut)
+@router.get("/settings/", response_model=CategorySettingsOut, dependencies=[require_feature("core")])
 async def get_category_settings():
     categories = await content_classifier.get_categories()
     return {"categories": categories}
 
 
-@router.put("/settings/", response_model=CategorySettingsOut)
+@router.put("/settings/", response_model=CategorySettingsOut, dependencies=[require_feature("category_settings")])
 async def update_category_settings(body: CategorySettingsIn):
     if not body.categories:
         raise HTTPException(status_code=400, detail="At least one category is required")
@@ -115,7 +116,7 @@ class RecategorizeStatus(BaseModel):
     error: str | None
 
 
-@router.post("/recategorize/")
+@router.post("/recategorize/", dependencies=[require_feature("category_settings")])
 async def recategorize_all():
     global _recategorize_task
     if _recategorize_state["status"] == "running":
@@ -125,7 +126,7 @@ async def recategorize_all():
     return {"status": "accepted"}
 
 
-@router.get("/recategorize/status/", response_model=RecategorizeStatus)
+@router.get("/recategorize/status/", response_model=RecategorizeStatus, dependencies=[require_feature("category_settings")])
 async def recategorize_status():
     return _recategorize_state
 

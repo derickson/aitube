@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.app.features import require_feature
 from backend.app.models.subscription import (
     Subscription,
     SubscriptionCreate,
@@ -35,7 +36,7 @@ class ResolvedPreview(BaseModel):
     sample_items: list[dict] = []
 
 
-@router.post("/resolve/", response_model=ResolvedPreview)
+@router.post("/resolve/", response_model=ResolvedPreview, dependencies=[require_feature("content")])
 async def resolve_subscription_url(data: ResolveRequest):
     """Resolve a raw URL into subscription metadata for preview."""
     try:
@@ -53,7 +54,7 @@ async def resolve_subscription_url(data: ResolveRequest):
     )
 
 
-@router.post("/", response_model=Subscription)
+@router.post("/", response_model=Subscription, dependencies=[require_feature("content")])
 async def create_subscription(data: SubscriptionCreate):
     es = get_es_client()
     doc_id = str(uuid.uuid4())
@@ -72,7 +73,7 @@ class SubscriptionWithCount(Subscription):
     content_count: int = 0
 
 
-@router.get("/", response_model=list[SubscriptionWithCount])
+@router.get("/", response_model=list[SubscriptionWithCount], dependencies=[require_feature("core")])
 async def list_subscriptions(demo: DemoMode = False):
     es = get_es_client()
     demo_scope = await demo_filters(demo)
@@ -112,7 +113,7 @@ async def list_subscriptions(demo: DemoMode = False):
     return results
 
 
-@router.get("/{sub_id}/", response_model=Subscription)
+@router.get("/{sub_id}/", response_model=Subscription, dependencies=[require_feature("core")])
 async def get_subscription(sub_id: str):
     es = get_es_client()
     try:
@@ -122,7 +123,7 @@ async def get_subscription(sub_id: str):
     return Subscription(id=resp["_id"], **resp["_source"])
 
 
-@router.patch("/{sub_id}/", response_model=Subscription)
+@router.patch("/{sub_id}/", response_model=Subscription, dependencies=[require_feature("content")])
 async def update_subscription(sub_id: str, data: SubscriptionUpdate):
     es = get_es_client()
     updates = data.model_dump(exclude_none=True)
@@ -133,7 +134,7 @@ async def update_subscription(sub_id: str, data: SubscriptionUpdate):
     return Subscription(id=resp["_id"], **resp["_source"])
 
 
-@router.delete("/{sub_id}/")
+@router.delete("/{sub_id}/", dependencies=[require_feature("content")])
 async def delete_subscription(sub_id: str):
     es = get_es_client()
     await es.delete(index=SUBSCRIPTIONS_INDEX, id=sub_id)
