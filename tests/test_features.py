@@ -140,3 +140,10 @@ def test_work_deployment_404s_disabled_endpoints(deployment, method, path):
     deployment("work")
     resp = TestClient(app).request(method, path, json={})
     assert resp.status_code == 404, resp.text
+
+
+def test_mirror_flag_rejected_without_work_cluster(deployment):
+    deployment("prod")  # no WORK_ELASTICSEARCH_URL -> work_mirror off
+    resp = TestClient(app).patch("/api/subscriptions/abc/", json={"mirror_to_work": True})
+    assert resp.status_code == 400
+    assert "not configured" in resp.json()["detail"]

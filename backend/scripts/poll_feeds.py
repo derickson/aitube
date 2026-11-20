@@ -6,6 +6,7 @@ import logging
 from backend.app.services import apm
 from backend.app.services.feed_poller import poll_all_active
 from backend.app.services.elasticsearch import close_es_client
+from backend.app.services.work_mirror import close_work_client
 
 apm.configure_logging()
 # Reduce noise from HTTP client and Elasticsearch transport during polling
@@ -25,6 +26,7 @@ async def _run():
         logger.info("Poll complete: %d new items across %d subscriptions", total, len(results))
     finally:
         await close_es_client()
+        await close_work_client()
         if apm_client:
             apm_client.close()
 

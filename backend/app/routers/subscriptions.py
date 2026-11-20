@@ -1,11 +1,13 @@
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.app.features import require_feature
+from backend.app.features import is_enabled, require_feature
+from backend.app.services import work_mirror
 from backend.app.models.subscription import (
     Subscription,
     SubscriptionCreate,
@@ -20,6 +22,7 @@ from backend.app.services.elasticsearch import (
 from backend.app.services.url_resolver import resolve_url
 
 router = APIRouter(prefix="/api/subscriptions", tags=["subscriptions"])
+logger = logging.getLogger(__name__)
 
 
 class ResolveRequest(BaseModel):
@@ -129,9 +132,31 @@ async def update_subscription(sub_id: str, data: SubscriptionUpdate):
     updates = data.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    await es.update(index=SUBSCRIPTIONS_INDEX, id=sub_id, doc=updates)
+    if "mirror_to_work" in updates and not is_enabled("work_mirror"):
+        raise HTTPException(status_code=400, detail="Work mirroring is not configured on this deployment")
+    await es.update(index=SUBSCRIPTIONS_INDEX, id=sub_id, doc=updates, refresh="wait_for")
     resp = await es.get(index=SUBSCRIPTIONS_INDEX, id=sub_id)
+    if "mirror_to_work" in updates:
+        # Backfill or purge in the background: a full backfill can take a while.
+        job = (
+            work_mirror.mirror_subscription(sub_id)
+            if updates["mirror_to_work"]
+            else work_mirror.unmirror_subscription(sub_id)
+        )
+        task = asyncio.create_task(_run_mirror_job(job, sub_id))
+        _mirror_tasks.add(task)
+        task.add_done_callback(_mirror_tasks.discard)
     return Subscription(id=resp["_id"], **resp["_source"])
+
+
+_mirror_tasks: set[asyncio.Task] = set()
+
+
+async def _run_mirror_job(job, sub_id: str) -> None:
+    try:
+        await job
+    except Exception:
+        logger.exception("work mirror job failed for subscription %s", sub_id)
 
 
 @router.delete("/{sub_id}/", dependencies=[require_feature("content")])

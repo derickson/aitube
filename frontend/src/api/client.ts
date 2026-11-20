@@ -84,6 +84,8 @@ export interface Subscription {
   added_at: string;
   last_polled_at: string | null;
   content_count: number;
+  /** Prod only: this subscription's content is also mirrored to the work cluster. */
+  mirror_to_work?: boolean;
 }
 
 export interface TranscriptChunk {
@@ -212,6 +214,7 @@ export function updateSubscription(
     description?: string;
     interest_notes?: string;
     status?: SubscriptionStatus;
+    mirror_to_work?: boolean;
   },
 ): Promise<Subscription> {
   return apiFetch(`/subscriptions/${id}/`, {

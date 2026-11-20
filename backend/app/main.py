@@ -11,6 +11,7 @@ from backend.app.routers import app_config, subscriptions, content, playback, po
 from backend.app.services import apm
 from backend.app.services.elasticsearch import close_es_client, ensure_indices
 from backend.app.services.playback_buffer import playback_buffer
+from backend.app.services.work_mirror import close_work_client
 from backend.app.services.watch_time_tracker import watch_time_tracker
 
 if settings.elastic_apm_server_url:
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     await watch_time_tracker.stop()
     await playback_buffer.stop()
     await close_es_client()
+    await close_work_client()
 
 
 app = FastAPI(title="AITube", version="0.1.0", lifespan=lifespan, redirect_slashes=False)

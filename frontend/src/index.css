@@ -789,6 +789,16 @@ main:has(.flyout-open) {
 .status-active { color: var(--success); }
 .status-muted { color: var(--warning); }
 .status-unfollowed { color: var(--text-secondary); }
+.status-mirrored { color: var(--accent, var(--success)); }
+
+.sub-mirror-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
 
 .sub-content-count {
   color: var(--accent);

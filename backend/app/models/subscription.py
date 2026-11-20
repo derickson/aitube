@@ -31,6 +31,9 @@ class SubscriptionUpdate(BaseModel):
     description: Optional[str] = None
     interest_notes: Optional[str] = None
     status: Optional[SubscriptionStatus] = None
+    # Prod only (feature work_mirror): also mirror this subscription's content
+    # into the work cluster. See backend/app/services/work_mirror.py.
+    mirror_to_work: Optional[bool] = None
 
 
 class Subscription(BaseModel):
@@ -43,3 +46,4 @@ class Subscription(BaseModel):
     status: SubscriptionStatus = SubscriptionStatus.active
     added_at: datetime
     last_polled_at: Optional[datetime] = None
+    mirror_to_work: bool = False

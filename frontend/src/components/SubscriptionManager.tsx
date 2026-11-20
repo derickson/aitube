@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { ErrorBanner } from "./ErrorBanner";
 import { AddContent } from "./AddContent";
+import { useFeature } from "../features/Features";
 import {
   listSubscriptions,
   createSubscription,
@@ -38,6 +39,8 @@ const STATUS_FILTERS: { value: SubscriptionStatus | "all"; label: string }[] = [
 const STATUS_OPTIONS: SubscriptionStatus[] = ["active", "muted", "unfollowed"];
 
 export function SubscriptionManager() {
+  // Present only on prod with WORK_ELASTICSEARCH_URL configured.
+  const mirrorEnabled = useFeature("work_mirror");
   const [subs, setSubs] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -162,6 +165,17 @@ export function SubscriptionManager() {
       fetchSubs();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update");
+    }
+  };
+
+  // Optimistic: the backend backfills (or purges) the work cluster in the background.
+  const handleMirrorChange = async (sub: Subscription, on: boolean) => {
+    setSubs((prev) => prev.map((s) => (s.id === sub.id ? { ...s, mirror_to_work: on } : s)));
+    try {
+      await updateSubscription(sub.id, { mirror_to_work: on });
+    } catch (e) {
+      setSubs((prev) => prev.map((s) => (s.id === sub.id ? { ...s, mirror_to_work: !on } : s)));
+      setError(e instanceof Error ? e.message : "Failed to update work mirroring");
     }
   };
 
@@ -391,6 +405,11 @@ export function SubscriptionManager() {
                     <div className="sub-meta">
                       <span className={`status-badge status-${sub.status}`}>{sub.status}</span>
                       <span className="sub-content-count">{sub.content_count} items</span>
+                      {mirrorEnabled && sub.mirror_to_work && (
+                        <span className="status-badge status-mirrored" title="Mirrored to the work deployment">
+                          on work
+                        </span>
+                      )}
                       {sub.last_polled_at && (
                         <span className="sub-polled">
                           Polled: {new Date(sub.last_polled_at).toLocaleString()}
@@ -399,6 +418,20 @@ export function SubscriptionManager() {
                     </div>
                   </div>
                   <div className="sub-actions">
+                    {mirrorEnabled && (
+                      <label
+                        className="sub-mirror-toggle"
+                        title="Also publish this subscription's content to the work deployment. Turning it off removes it from work."
+                      >
+                        <input
+                          type="checkbox"
+                          className="settings-switch"
+                          checked={!!sub.mirror_to_work}
+                          onChange={(e) => handleMirrorChange(sub, e.target.checked)}
+                        />
+                        <span>Work</span>
+                      </label>
+                    )}
                     <select
                       value={sub.status}
                       onChange={(e) =>

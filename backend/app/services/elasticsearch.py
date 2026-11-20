@@ -1,6 +1,10 @@
+import logging
+
 from elasticsearch import AsyncElasticsearch
 
 from backend.app.config import settings
+
+logger = logging.getLogger(__name__)
 
 SUBSCRIPTIONS_INDEX = "aitube-subscriptions"
 CONTENT_ITEMS_INDEX = settings.content_items_index
@@ -86,6 +90,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "status": {"type": "keyword"},
                 "added_at": {"type": "date"},
                 "last_polled_at": {"type": "date"},
+                "mirror_to_work": {"type": "boolean"},
             }
         }
     },
@@ -323,7 +328,13 @@ async def ensure_indices() -> None:
     es = get_es_client()
     for index_name, body in INDEX_MAPPINGS.items():
         if not await es.indices.exists(index=index_name):
-            await es.indices.create(index=index_name, body=body)
+            # One index failing (e.g. the v2 content index on a cluster without its
+            # semantic_text inference endpoint, like a fresh work cluster) must not
+            # stop the rest from being created.
+            try:
+                await es.indices.create(index=index_name, body=body)
+            except Exception as e:
+                logger.warning("Could not create index %s: %s", index_name, e)
         else:
             # Update mappings for any new fields on existing indices
             try:

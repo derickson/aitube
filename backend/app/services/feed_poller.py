@@ -15,7 +15,8 @@ from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 from backend.app.models.subscription import Subscription, SubscriptionType
-from backend.app.services import apm, content_cache, content_dlp, corridor
+from backend.app.config import settings
+from backend.app.services import apm, content_cache, content_dlp, corridor, work_mirror
 from backend.app.services.elasticsearch import (
     CONTENT_ITEMS_INDEX,
     PLAYBACK_STATE_INDEX,
@@ -1346,6 +1347,15 @@ async def poll_all_active() -> dict[str, list[str]]:
     # Categorize recent items that came through without a category
     async with apm.transaction("backfill_missing_categories", "poll"):
         await backfill_missing_categories()
+
+    # Last, so the work cluster gets this cycle's summaries and categories too.
+    # Best-effort: the work cluster being down must never fail a prod poll.
+    if work_mirror.is_configured():
+        async with apm.transaction("sync_to_work", "poll"):
+            try:
+                await work_mirror.sync_to_work(days=settings.work_mirror_days)
+            except Exception:
+                logger.exception("work mirror sync failed")
 
     content_cache.invalidate()
     return results
