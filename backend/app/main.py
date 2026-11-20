@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.config import settings
 from backend.app.features import enabled_ids, require_feature
+from backend.app.frontend import mount_frontend
 from backend.app.routers import app_config, subscriptions, content, playback, polling, chat, watchlist, add_content, consumption_report, consumption_stats, topic_flow, quarantine, engagement, embeddings, category, search_explain, detox
 from backend.app.services import apm
 from backend.app.services.elasticsearch import close_es_client, ensure_indices
@@ -89,6 +90,11 @@ app.include_router(detox.router, dependencies=[require_feature("detox")])
 @app.get("/health/")
 async def health():
     return {"status": "ok", "deployment": settings.deployment}
+
+
+# Single-container image: also serve the built frontend at /aitube/ (see frontend.py).
+if settings.serve_frontend_dir:
+    mount_frontend(app, settings.serve_frontend_dir)
 
 
 def start():

@@ -1,4 +1,7 @@
-.PHONY: init docker-stop docker-start docker-redeploy run dev stop test
+.PHONY: init docker-stop docker-start docker-redeploy run dev stop test work-build work-run work-stop
+
+WORK_IMAGE ?= aitube-work:local
+WORK_PORT ?= 8104
 
 init:
 	cd frontend && npm install
@@ -17,6 +20,19 @@ docker-redeploy: stop
 	docker compose stop
 	docker compose build
 	docker compose up -d
+
+# Single-container "work" image (root Dockerfile). work-run reads .env.work
+# (copy .env.work.example) and serves http://localhost:$(WORK_PORT)/aitube/
+work-build:
+	docker build -t $(WORK_IMAGE) .
+
+work-run: work-build
+	-@docker rm -f aitube-work >/dev/null 2>&1
+	docker run -d --name aitube-work --env-file .env.work -p $(WORK_PORT):8000 $(WORK_IMAGE)
+	@echo "Work deployment: http://localhost:$(WORK_PORT)/aitube/"
+
+work-stop:
+	-docker rm -f aitube-work
 
 run: init
 	@echo "Starting backend on :3103 and frontend on :8103..."

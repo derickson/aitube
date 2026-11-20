@@ -120,6 +120,26 @@ Auth: same posture as the rest of the API — perimeter is enforced by nginx bas
 
 Suggested n8n webhook names if exposed: `aitube-content-transcript`, `aitube-quarantine-content-item`.
 
+### Deployments: prod and work
+
+The same code runs as two deployments (plan and decisions: `WORK_DEPLOYMENT_PLAN.md`):
+
+- **prod** (smaug, `DEPLOYMENT=prod`, the default): the active instance described above, i.e. cron polling, content-dlp, Hermes, the two-container compose setup.
+- **work** (`DEPLOYMENT=work`): a passive public demo for coworkers, run as the single-container root `Dockerfile` (uvicorn serves the API and the built frontend; `frontend.py` serves `/aitube/` with SPA fallback and rewrites `/aitube/api/*` to `/api/*`, replacing both nginx and the proxy prefix strip). It has only the work cluster's credentials, in the normal `ELASTICSEARCH_*` vars, and never ingests. It's headed for ArgoCD.
+
+**Feature registry** (`backend/app/features.py`): every page, settings-menu item and in-page capability is a feature marked prod, work or both; `FEATURES_ENABLE` / `FEATURES_DISABLE` override single ids. Every `/api` route carries `require_feature(id)` (router-level in `main.py`, per endpoint in the mixed routers subscriptions/content/playback/add_content/category), and a disabled feature **404s**. That's the access control on work, which has no basic-auth perimeter, so writes must not exist there. `tests/test_features.py` fails on any unclassified route: **classify every new endpoint**. The frontend fetches `GET /api/config/` in `features/Features.tsx` (`FeaturesProvider`, `useFeature`) and builds the nav, the settings menu and the routes from it (`PAGES` in `App.tsx`). Without `user_state`, personal-state writes in `api/client.ts` resolve locally without a request, and the watched/interest controls and Status/Interest facets are hidden.
+
+**Work mirror** (`services/work_mirror.py`, prod only, on when `WORK_ELASTICSEARCH_URL` is set): subscriptions flagged `mirror_to_work` (the "Work" toggle on the Content page, feature `work_mirror`) are copied into the work cluster. Prod re-syncs from its own cluster rather than dual-writing at each content write site. `sync_to_work(days=WORK_MIRROR_DAYS)` is the last poll phase: it upserts recent items, deletes work items prod deduplicated away, and purges unflagged subscriptions. Flagging a subscription backfills it; unflagging purges it. Personal state (`EXCLUDED_FIELDS`) never leaves prod. Purges refresh before `delete_by_query`, because otherwise just-reindexed docs version-conflict and `conflicts="proceed"` silently skips them.
+
+```bash
+uv run python -m backend.scripts.sync_to_work --dry-run      # windowed, report only
+uv run python -m backend.scripts.sync_to_work --full         # backfill / repair all time
+DEPLOYMENT=work make dev                                     # preview the work feature set locally
+make work-run                                                # build + run the work image with .env.work on :8104
+```
+
+`tests/test_work_mirror.py` runs against two throwaway ES nodes (`AITUBE_TEST_PROD_ES`, `AITUBE_TEST_WORK_ES`; see its docstring) and is skipped otherwise.
+
 ### Observability (Elastic APM)
 
 Classic `elastic-apm` agent, configured from `ELASTIC_APM_*` in `.env` (API key preferred over secret token). Services: `aitube-backend` (FastAPI middleware), `aitube-poller` and `aitube-clusterer` (cron scripts), and `content-dlp` (sibling repo, Flask). `services/apm.py` holds the shared pieces:

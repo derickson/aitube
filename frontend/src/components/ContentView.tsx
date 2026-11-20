@@ -327,12 +327,14 @@ export function ContentView({ itemId, subName, onClose, onConsumedChange }: Prop
                   Original
                 </a>
               )}
-              <button
-                className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
-                onClick={handleMarkViewed}
-              >
-                {consumed ? "Viewed" : "Mark Viewed"}
-              </button>
+              {userStateEnabled && (
+                <button
+                  className={`btn ${consumed ? "btn-viewed" : "btn-primary"}`}
+                  onClick={handleMarkViewed}
+                >
+                  {consumed ? "Viewed" : "Mark Viewed"}
+                </button>
+              )}
               <button className="btn" onClick={onClose}>Close</button>
             </div>
           </div>

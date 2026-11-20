@@ -1,0 +1,24 @@
+# Build context for the root Dockerfile (single-container work image).
+# Secrets must never reach an image layer.
+.env
+.env.*
+!.env.example
+!.env.work.example
+
+.git
+.github
+.claude
+graft
+.venv
+.pytest_cache
+**/__pycache__
+**/*.pyc
+*.log
+cron.log*
+
+frontend/node_modules
+frontend/dist
+frontend/tsconfig.tsbuildinfo
+
+tests
+splash.jpg

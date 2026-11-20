@@ -144,9 +144,33 @@ ArgoCD chain expects.
 
 ## Order of work / status
 
-- [ ] 1. Feature registry (backend gating, `/api/config/`, coverage test)
-- [ ] 2. Frontend driven by features (nav, gear, routes, capabilities)
-- [ ] 3. Work mirror (config, service, subscription flag + toggle, poll phase, script, tests)
-- [ ] 4. Single-container image, `.dockerignore`, static serving, make targets
-- [ ] 5. CLAUDE.md docs
+- [x] 1. Feature registry (backend gating, `/api/config/`, coverage test)
+- [x] 2. Frontend driven by features (nav, gear, routes, capabilities)
+- [x] 3. Work mirror (config, service, subscription flag + toggle, poll phase, script, tests)
+- [x] 4. Single-container image, `.dockerignore`, static serving, make targets
+      (`make work-run` + `.env.work.example` instead of a compose file)
+- [x] 5. CLAUDE.md docs
 - [ ] 6. CI + ArgoCD manifests (after skills are provided)
+
+### Verified (2026-11-20)
+
+- Unit tests: feature sets, route coverage, work-mode 404s, frontend serving.
+- Mirror integration tests against two real ES 9.2 nodes (full/windowed sync, dedup
+  deletes, unflag purge, work-side fields survive, dry run, unconfigured no-op).
+- End to end with the built image: fake prod node → `sync_to_work --full` → work node →
+  container in `DEPLOYMENT=work`. Only flagged items served, no personal fields; nav is
+  Timeline + Search, gear has only Search Explain, no watched/interest/Chat controls,
+  prod-only URLs show NotFound, every write endpoint 404s. Same image in
+  `DEPLOYMENT=prod`: full nav, Work toggle backfills (2 items) and purges from the UI.
+
+### Before going live
+
+- Prod `.env` on smaug: add `WORK_ELASTICSEARCH_URL` / `WORK_ELASTICSEARCH_API_KEY`
+  (an API key scoped to write the `aitube-*` indices on the work cluster).
+- The work deployment's own key can be read-only on `aitube-*` (it writes nothing
+  with the current feature set). Its startup `ensure_indices` just logs a warning if
+  it can't create indices, which is fine once prod's mirror has created them.
+- If prod runs the v2 content index, create the same inference endpoint on the work
+  cluster first, and set `CONTENT_ITEMS_INDEX` identically on both.
+- Topic Flow / Embeddings / Prediction stay off on work until cluster runs are mirrored
+  in a demo-safe way.
